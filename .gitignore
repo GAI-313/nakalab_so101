@@ -1,0 +1,12 @@
+# Python
+__pycache__
+
+# ROS2
+depends
+build
+install
+log
+
+# pixi environments
+.pixi/*
+!.pixi/config.toml

@@ -1,0 +1,39 @@
+[workspace]
+authors = ["GAI-313 <nakatogawagai@gmail.com>"]
+channels = ["conda-forge", "robostack-jazzy"]
+name = "nakalab_so101"
+platforms = ["osx-64", "osx-arm64"]
+version = "0.1.0"
+
+[activation.env]
+# ROS2
+CYCLONEDDS_URI = "file://$PIXI_PROJECT_ROOT/cyclonedds.xml"
+RMW_IMPLEMENTATION="rmw_cyclonedds_cpp"
+ROS_AUTOMATIC_DISCOVERY_RANGE="SUBNET"
+ROS_DOMAIN_ID="0"
+
+[activation]
+scripts = ["install/setup.sh"]
+
+[tasks]
+vcs = "vcs import . < depends.repos"
+colcon_build = {cmd = "colcon build --symlink-install --packages-up-to nakalab_so101_py", depends-on=["vcs"]}
+
+[dependencies]
+# python
+python = "3.12.*"
+pyserial = "*"
+setuptools = "<70.0.0"
+
+# develop tools
+vcstool = "*"
+ros-dev-tools = "*"
+
+# ROS2
+ros-jazzy-desktop = "*"
+ros-jazzy-rmw-cyclonedds-cpp = "*"
+# depends
+ros-jazzy-rviz2 = "*"
+ros-jazzy-xacro = "*"
+ros-jazzy-robot-state-publisher = "*"
+ros-jazzy-joint-state-publisher-gui = "*"
