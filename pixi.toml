@@ -17,7 +17,7 @@ scripts = ["install/setup.sh"]
 
 [tasks]
 vcs = "vcs import . < depends.repos"
-colcon_build = "colcon build --symlink-install --packages-up-to nakalab_so101_py"
+colcon_build = {cmd = "colcon build --symlink-install --packages-up-to nakalab_so101_py", depends-on=["vcs"]}
 
 [dependencies]
 # python
