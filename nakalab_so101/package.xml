@@ -17,6 +17,7 @@
   <depend>std_msgs</depend>
   <depend>std_srvs</depend>
   <depend>libserial-dev</depend>
+  <depend>rmw_cyclonedds_cpp</depend>
 
   <export>
     <build_type>ament_cmake</build_type>
