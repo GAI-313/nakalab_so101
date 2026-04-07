@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>nakalab_so101</name>
+  <name>nakalab_so101_description</name>
   <version>0.0.0</version>
-  <description>SO-101 driver for ROS2</description>
+  <description>SO-101 URDF robot description</description>
   <maintainer email="nakatogawagai@gmail.com">GAI-313</maintainer>
   <license>MIT</license>
 
@@ -12,14 +12,11 @@
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 
-  <depend>rclcpp</depend>
-  <depend>sensor_msgs</depend>
-  <depend>std_msgs</depend>
-  <depend>std_srvs</depend>
-  <depend>libserial-dev</depend>
-  <depend>rmw_cyclonedds_cpp</depend>
+  <depend>joint_state_publisher_gui</depend>
+  <depend>robot_state_publisher</depend>
+  <depend>xacro</depend>
 
-  <depend>nakalab_so101_description</depend>
+  <depend>nakalab_realsense</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

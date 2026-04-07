@@ -1,0 +1,12 @@
+<?xml version="1.0" ?>
+<robot name="so101_follower_arm" xmlns:xacro="http://ros.org/wiki/xacro">
+    <xacro:include filename="$(find nakalab_so101_description)/urdf/_so101.urdf.xacro" />
+
+    <!-- xacro args -->
+    <xacro:arg name="camera_type" default="" />
+
+    <link name="world" />
+    <xacro:so101_follower_arm parent="world" camera_type="$(arg camera_type)">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:so101_follower_arm>
+</robot>
