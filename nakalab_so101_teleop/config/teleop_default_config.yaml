@@ -1,0 +1,23 @@
+/**:
+  ros__parameters:
+    # Metadata information (LeRobotDataset standard)
+    dataset:
+      repo_id: "nakalab_so101"
+      task_name: "pick and place"
+      save_path: "/Users/gai/Downloads/"
+      fps: 30
+
+    # Observation topics (LeRobot mapping: state, images)
+    observation:
+      joint_topic: "/follower/joint_states"   # mapped to observation.state
+      arm_camera_topic: "/so101_camera/d435/color/image_raw" # mapped to observation.images.arm
+      
+      # Dictionary of other camera topics (mapped to observation.images.<key>)
+      other_topics:
+        # side: "/camera_side/image_raw"
+        # top: "/camera_top/image_raw"
+        {}
+
+    # Action topics
+    action:
+      joint_topic: "/follower/joint_commands" # mapped to action

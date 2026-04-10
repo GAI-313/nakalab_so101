@@ -1,0 +1,9 @@
+<library path="lerobot_teleop_panel">
+  <class name="nakalab_so101_teleop/LeRobotTeleopPanel"
+         type="nakalab_so101_teleop::LeRobotTeleopPanel"
+         base_class_type="rviz_common::Panel">
+    <description>
+      A panel for teleoperating SO-101 and collecting LeRobot v0.4.0 datasets.
+    </description>
+  </class>
+</library>

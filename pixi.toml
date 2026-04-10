@@ -31,11 +31,29 @@ setuptools = "<70.0.0"
 vcstool = "*"
 ros-dev-tools = "*"
 
+# cpp
+qt-main = ">=5.15.15,<6"
+yaml-cpp = ">=0.8.0,<0.9"
+libarrow-all = ">=17.0.0,<18"
+nlohmann_json = ">=3.11.2,<4"
+
 # ROS2
 ros-jazzy-desktop = "*"
 ros-jazzy-rmw-cyclonedds-cpp = "*"
 # depends
+ros-jazzy-cv-bridge = "*"
+ros-jazzy-sensor-msgs = "*"
 ros-jazzy-rviz2 = "*"
 ros-jazzy-xacro = "*"
 ros-jazzy-robot-state-publisher = "*"
 ros-jazzy-joint-state-publisher-gui = "*"
+ros-jazzy-ament-index-cpp = ">=1.8.2,<2"
+ros-jazzy-rosbag2-cpp = ">=0.26.9,<0.27"
+ros-jazzy-rosbag2-storage = ">=0.26.9,<0.27"
+# rosbag
+ros-jazzy-ros2bag = "*"
+ros-jazzy-rosbag2-storage-mcap = ">=0.26.9,<0.27"
+# rviz
+ros-jazzy-rviz-common = ">=14.1.19,<15"
+ros-jazzy-rviz-rendering = ">=14.1.19,<15"
+ros-jazzy-pluginlib = ">=5.4.4,<6"

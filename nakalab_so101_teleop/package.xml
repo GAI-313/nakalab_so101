@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>nakalab_so101_teleop</name>
+  <version>0.0.0</version>
+  <description>Teleop tools for SO-101 follower arm.</description>
+  <maintainer email="nakatogawagai@gmail.com">GAI-313</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <depend>ros2bag</depend>
+  <depend>rosbag2_storage_mcap</depend>
+
+  <depend>rclcpp</depend>
+  <depend>std_srvs</depend>
+  <depend>rviz_common</depend>
+  <depend>rviz_rendering</depend>
+  <depend>pluginlib</depend>
+  <depend>yaml-cpp</depend>
+  <depend>ament_index_cpp</depend>
+  <depend>rosbag2_cpp</depend>
+  <depend>cv_bridge</depend>
+  <depend>sensor_msgs</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
