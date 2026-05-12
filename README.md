@@ -50,7 +50,11 @@ SO-101 Driver for ROS2
     ```
     `Remove the USB cable from your MotorsBus and press Enter when done.` と表示されたら，SO-101 Leader アームを Mac から抜いて，エンターキーを押してください．するとアームのデバイスパスが検出されます．
 
-1. SO-101 Leader アームを Mac に際接続し，
+1. SO-101 Leader アームを Mac に際接続し，次のコマンドを実行して teleop を起動します．`<device>` には先ほど特定したデバイスパスを記述してください．
+    ```bash
+    pixi run teleop device:=<device>
+    ```
+    別 PC などで `follower_arm.launch.py` が起動していれば，RViz にロボットが表示されます．
 
 ## Build on Linux
 ```bash
