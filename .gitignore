@@ -10,3 +10,6 @@ log
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# OSX
+.DS_Store
