@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""CLI wrapper for writing LeRobot parquet files."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+
+from nakalab_so101_teleop.parquet_writer import write_lerobot_parquet
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input_json")
+    parser.add_argument("output_parquet")
+    args = parser.parse_args()
+
+    try:
+        write_lerobot_parquet(args.input_json, args.output_parquet)
+    except Exception as exc:  # noqa: BLE001 - CLI should report all failures.
+        print(f"write_lerobot_parquet failed: {exc}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

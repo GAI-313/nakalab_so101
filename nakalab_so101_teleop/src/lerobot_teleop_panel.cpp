@@ -190,7 +190,8 @@ void LeRobotTeleopPanel::startRecording()
         type_name,
         rclcpp::SensorDataQoS(),
         [this, topic_name, type_name](std::shared_ptr<const rclcpp::SerializedMessage> msg) {
-          writer_->write(msg, topic_name, type_name, node_->now());
+          auto bag_msg = std::make_shared<rclcpp::SerializedMessage>(*msg);
+          writer_->write(bag_msg, topic_name, type_name, node_->now());
         }
       );
       subscriptions_.push_back(sub);

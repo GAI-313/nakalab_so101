@@ -8,7 +8,6 @@
 #include <filesystem>
 
 #include <yaml-cpp/yaml.h>
-#include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
 
 namespace nakalab_so101_teleop

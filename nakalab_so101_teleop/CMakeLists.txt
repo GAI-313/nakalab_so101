@@ -7,6 +7,7 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
 
 find_package(rclcpp REQUIRED)
 find_package(std_srvs REQUIRED)
@@ -16,9 +17,6 @@ find_package(pluginlib REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(rosbag2_cpp REQUIRED)
-find_package(Arrow REQUIRED)
-find_package(Parquet REQUIRED)
-find_package(nlohmann_json REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -50,13 +48,19 @@ ament_target_dependencies(lerobot_teleop_panel
 target_link_libraries(lerobot_teleop_panel
   Qt5::Widgets
   yaml-cpp
-  Arrow::arrow_shared
-  Parquet::parquet_shared
-  nlohmann_json::nlohmann_json
   ${OpenCV_LIBRARIES}
 )
 
 pluginlib_export_plugin_description_file(rviz_common plugins.xml)
+
+ament_python_install_package(${PROJECT_NAME}
+  PACKAGE_DIR python/${PROJECT_NAME}
+)
+
+install(PROGRAMS
+  scripts/write_lerobot_parquet
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 install(TARGETS lerobot_teleop_panel
   EXPORT export_${PROJECT_NAME}

@@ -2,21 +2,100 @@
 
 #include <rosbag2_cpp/reader.hpp>
 #include <rosbag2_storage/storage_options.hpp>
+#include <rosbag2_storage/serialized_bag_message.hpp>
 #include <rosbag2_cpp/converter_options.hpp>
 
-#include <arrow/api.h>
-#include <arrow/io/api.h>
-#include <parquet/arrow/writer.h>
-
+#include <ament_index_cpp/get_package_prefix.hpp>
+#if __has_include(<cv_bridge/cv_bridge.hpp>)
 #include <cv_bridge/cv_bridge.hpp>
+#else
+#include <cv_bridge/cv_bridge.h>
+#endif
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <regex>
+#include <type_traits>
+#include <utility>
 
 namespace nakalab_so101_teleop
 {
+
+namespace
+{
+
+std::string shellQuote(const std::string & value)
+{
+    std::string quoted = "'";
+    for (const char c : value) {
+        if (c == '\'') {
+            quoted += "'\\''";
+        } else {
+            quoted += c;
+        }
+    }
+    quoted += "'";
+    return quoted;
+}
+
+std::string jsonEscape(const std::string & value)
+{
+    std::string escaped;
+    for (const char c : value) {
+        switch (c) {
+            case '\\':
+                escaped += "\\\\";
+                break;
+            case '"':
+                escaped += "\\\"";
+                break;
+            case '\n':
+                escaped += "\\n";
+                break;
+            case '\r':
+                escaped += "\\r";
+                break;
+            case '\t':
+                escaped += "\\t";
+                break;
+            default:
+                escaped += c;
+                break;
+        }
+    }
+    return escaped;
+}
+
+void writeFloatArray(std::ofstream & ofs, const std::vector<float> & values)
+{
+    ofs << "[";
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) ofs << ",";
+        ofs << values[i];
+    }
+    ofs << "]";
+}
+
+template<typename T, typename = void>
+struct has_recv_timestamp : std::false_type {};
+
+template<typename T>
+struct has_recv_timestamp<T, std::void_t<decltype(std::declval<T>().recv_timestamp)>> : std::true_type {};
+
+template<typename T>
+int64_t bagMessageTimestamp(const T & msg)
+{
+    if constexpr (has_recv_timestamp<T>::value) {
+        return msg.recv_timestamp;
+    } else {
+        return msg.time_stamp;
+    }
+}
+
+}  // namespace
 
 LeRobotExporter::LeRobotExporter(const YAML::Node & config_node)
 {
@@ -74,14 +153,14 @@ bool LeRobotExporter::exportBag(const std::string & bag_path, const std::string 
             rclcpp::Serialization<sensor_msgs::msg::JointState> serializer;
             serializer.deserialize_message(&serialized_msg, &js);
             std::vector<float> pos(js.position.begin(), js.position.end());
-            state_buffer[msg->recv_timestamp] = pos;
+            state_buffer[bagMessageTimestamp(*msg)] = pos;
         } else if (msg->topic_name == config_.action_topic) {
             sensor_msgs::msg::JointState js;
             rclcpp::SerializedMessage serialized_msg(*msg->serialized_data);
             rclcpp::Serialization<sensor_msgs::msg::JointState> serializer;
             serializer.deserialize_message(&serialized_msg, &js);
             std::vector<float> pos(js.position.begin(), js.position.end());
-            action_buffer[msg->recv_timestamp] = pos;
+            action_buffer[bagMessageTimestamp(*msg)] = pos;
         }
         for(auto const& [cam_name, topic] : cameras) {
             if (msg->topic_name == topic) {
@@ -108,56 +187,45 @@ bool LeRobotExporter::exportBag(const std::string & bag_path, const std::string 
         writer.release();
     }
 
-    // Parquet Writing with Arrow
-    auto index_builder = std::make_shared<arrow::Int64Builder>();
-    auto timestamp_builder = std::make_shared<arrow::DoubleBuilder>();
-    auto episode_builder = std::make_shared<arrow::Int64Builder>();
-    auto state_list_builder = std::make_shared<arrow::ListBuilder>(arrow::default_memory_pool(), std::make_shared<arrow::FloatBuilder>());
-    auto action_list_builder = std::make_shared<arrow::ListBuilder>(arrow::default_memory_pool(), std::make_shared<arrow::FloatBuilder>());
+    std::string parquet_input_path = (dataset_dir / "data" / ("chunk_" + std::to_string(episode_idx) + ".json")).string();
+    std::string parquet_path = (dataset_dir / "data" / ("chunk_" + std::to_string(episode_idx) + ".parquet")).string();
 
-    auto* state_value_builder = static_cast<arrow::FloatBuilder*>(state_list_builder->value_builder());
-    auto* action_value_builder = static_cast<arrow::FloatBuilder*>(action_list_builder->value_builder());
+    {
+        std::ofstream ofs(parquet_input_path);
+        if (!ofs) return false;
+        ofs << "[";
+        for (int i = 0; i < num_frames; ++i) {
+            if (i > 0) ofs << ",";
+            double ts = i / 30.0;
+            std::vector<float> current_state = (state_buffer.empty()) ? std::vector<float>{0,0,0,0,0,0} : state_buffer.begin()->second;
+            std::vector<float> current_action = (action_buffer.empty()) ? current_state : action_buffer.begin()->second;
 
-    // Simple nearest-neighbor sync for states/actions
-    for (int i = 0; i < num_frames; ++i) {
-        double ts = i / 30.0;
-        (void)index_builder->Append(i);
-        (void)timestamp_builder->Append(ts);
-        (void)episode_builder->Append(episode_idx);
-
-        // Find nearest state
-        std::vector<float> current_state = (state_buffer.empty()) ? std::vector<float>{0,0,0,0,0,0} : state_buffer.begin()->second;
-        // In this implementation, we take the one with the smallest timestamp or improve logic
-        (void)state_list_builder->Append();
-        for (float v : current_state) (void)state_value_builder->Append(v);
-        
-        // Find nearest action
-        std::vector<float> current_action = (action_buffer.empty()) ? current_state : action_buffer.begin()->second;
-        (void)action_list_builder->Append();
-        for (float v : current_action) (void)action_value_builder->Append(v);
+            ofs << "{\"index\":" << i
+                << ",\"timestamp\":" << ts
+                << ",\"episode_index\":" << episode_idx
+                << ",\"observation.state\":";
+            writeFloatArray(ofs, current_state);
+            ofs << ",\"action\":";
+            writeFloatArray(ofs, current_action);
+            ofs << "}";
+        }
+        ofs << "]";
     }
 
-    std::shared_ptr<arrow::Array> index_array, ts_array, ep_array, state_array, action_array;
-    (void)index_builder->Finish(&index_array);
-    (void)timestamp_builder->Finish(&ts_array);
-    (void)episode_builder->Finish(&ep_array);
-    (void)state_list_builder->Finish(&state_array);
-    (void)action_list_builder->Finish(&action_array);
+    std::filesystem::path writer_path =
+        std::filesystem::path(ament_index_cpp::get_package_prefix("nakalab_so101_teleop")) /
+        "lib" / "nakalab_so101_teleop" / "write_lerobot_parquet";
+    std::string command =
+        shellQuote(writer_path.string()) + " " +
+        shellQuote(parquet_input_path) + " " +
+        shellQuote(parquet_path);
 
-    auto schema = arrow::schema({
-        arrow::field("index", arrow::int64()),
-        arrow::field("timestamp", arrow::float64()),
-        arrow::field("episode_index", arrow::int64()),
-        arrow::field("observation.state", arrow::list(arrow::float32())),
-        arrow::field("action", arrow::list(arrow::float32()))
-    });
+    if (std::system(command.c_str()) != 0) {
+        return false;
+    }
 
-    auto table = arrow::Table::Make(schema, {index_array, ts_array, ep_array, state_array, action_array});
-    std::string parquet_path = (dataset_dir / "data" / ("chunk_" + std::to_string(episode_idx) + ".parquet")).string();
-    auto output_file_result = arrow::io::FileOutputStream::Open(parquet_path);
-    if (!output_file_result.ok()) return false;
-    auto output_file = output_file_result.ValueOrDie();
-    (void)parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), output_file, 1024);
+    std::error_code remove_error;
+    std::filesystem::remove(parquet_input_path, remove_error);
 
     appendEpisodeJsonl(dataset_dir, episode_idx, num_frames);
     writeInfoJson(dataset_dir, episode_idx + 1, num_frames);
@@ -171,12 +239,13 @@ int LeRobotExporter::getNextEpisodeIndex(const std::filesystem::path & dataset_d
     if (std::filesystem::exists(dataset_dir / "meta" / "episodes.jsonl")) {
         std::ifstream ifs(dataset_dir / "meta" / "episodes.jsonl");
         std::string line;
+        std::regex episode_index_regex("\"episode_index\"\\s*:\\s*(\\d+)");
         while (std::getline(ifs, line)) {
-            try {
-                auto j = nlohmann::json::parse(line);
-                int idx = j["episode_index"];
+            std::smatch match;
+            if (std::regex_search(line, match, episode_index_regex)) {
+                int idx = std::stoi(match[1].str());
                 if (idx > max_idx) max_idx = idx;
-            } catch (...) {}
+            }
         }
     }
     return max_idx + 1;
@@ -184,26 +253,22 @@ int LeRobotExporter::getNextEpisodeIndex(const std::filesystem::path & dataset_d
 
 void LeRobotExporter::writeInfoJson(const std::filesystem::path & dataset_dir, int num_episodes, int total_frames)
 {
-    nlohmann::json info;
-    info["codebase_version"] = "v0.1";
-    info["robot_type"] = "so-101";
-    info["total_episodes"] = num_episodes;
-    info["total_frames"] = total_frames;
-    info["fps"] = 30;
-    
     std::ofstream ofs(dataset_dir / "info.json");
-    ofs << info.dump(4);
+    ofs << "{\n"
+        << "    \"codebase_version\": \"v0.1\",\n"
+        << "    \"robot_type\": \"so-101\",\n"
+        << "    \"total_episodes\": " << num_episodes << ",\n"
+        << "    \"total_frames\": " << total_frames << ",\n"
+        << "    \"fps\": 30\n"
+        << "}";
 }
 
 void LeRobotExporter::appendEpisodeJsonl(const std::filesystem::path & dataset_dir, int episode_idx, int num_frames)
 {
-    nlohmann::json ep;
-    ep["episode_index"] = episode_idx;
-    ep["num_frames"] = num_frames;
-    ep["task"] = config_.task_name;
-    
     std::ofstream ofs(dataset_dir / "meta" / "episodes.jsonl", std::ios::app);
-    ofs << ep.dump() << "\n";
+    ofs << "{\"episode_index\":" << episode_idx
+        << ",\"num_frames\":" << num_frames
+        << ",\"task\":\"" << jsonEscape(config_.task_name) << "\"}\n";
 }
 
 }  // namespace nakalab_so101_teleop
