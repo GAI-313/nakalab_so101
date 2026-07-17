@@ -14,7 +14,12 @@
 
   <depend>rmw_cyclonedds_cpp</depend>
 
+  <depend>ament_index_python</depend>
   <depend>nakalab_so101_description</depend>
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
 
   <export>
     <build_type>ament_python</build_type>

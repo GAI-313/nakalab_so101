@@ -13,3 +13,10 @@ log
 
 # OSX
 .DS_Store
+
+# vscode
+.vscode
+
+# ignore calibration files
+nakalab_so101_description/calibration/**
+!nakalab_so101_description/calibration/.gitkeep
