@@ -13,6 +13,7 @@ install(DIRECTORY
   urdf
   meshes
   rviz
+  calibration
   DESTINATION share/${PROJECT_NAME}/
 )
 

@@ -20,6 +20,9 @@ vcs = "vcs import . < depends.repos"
 colcon_build = {cmd = "colcon build --symlink-install --packages-up-to nakalab_so101_py nakalab_so101_teleop", depends-on=["vcs"]}
 description = "ros2 launch nakalab_so101_description display.launch.py use_rviz:=true use_jspg:=true"
 find_port = "ros2 run nakalab_so101_py find_port"
+setup_motors = "ros2 run nakalab_so101_py setup_motors"
+calibrate = "ros2 run nakalab_so101_py calibrate"
+follower_arm_py = "ros2 run nakalab_so101_py follower_arm_driver_node"
 teleop = "ros2 launch nakalab_so101_teleop teleop.launch.py"
 
 [dependencies]

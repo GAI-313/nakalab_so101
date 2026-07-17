@@ -1,3 +1,5 @@
+"""Packaging metadata for nakalab_so101_py."""
+
 from setuptools import find_packages, setup
 
 package_name = 'nakalab_so101_py'
@@ -15,7 +17,9 @@ setup(
     zip_safe=True,
     maintainer='GAI-313',
     maintainer_email='nakatogawagai@gmail.com',
-    description='SO-101 driver for ROS2 python package. Support running in OSX',
+    description=(
+        'SO-101 driver for ROS2 python package. Support running in OSX'
+    ),
     license='MIT',
     extras_require={
         'test': [
@@ -24,8 +28,11 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            "find_port = nakalab_so101_py.find_port:main",
-            "leader_arm_driver_node = nakalab_so101_py.so101:leader"
+            'calibrate = nakalab_so101_py.calibrate:main',
+            'find_port = nakalab_so101_py.find_port:main',
+            'follower_arm_driver_node = nakalab_so101_py.so101:follower',
+            'setup_motors = nakalab_so101_py.setup_motors:main',
+            'leader_arm_driver_node = nakalab_so101_py.so101:leader',
         ],
     },
 )
