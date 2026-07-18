@@ -35,6 +35,7 @@ public:
   // High-level commands
   bool write_register(uint8_t motor_id, uint8_t address, const std::vector<uint8_t> & data);
   std::optional<std::vector<uint8_t>> read_register(uint8_t motor_id, uint8_t address, uint8_t length);
+  std::optional<int> read_homing_offset(uint8_t motor_id);
 
   bool sync_write_goal_positions(const std::map<uint8_t, int16_t> & motor_goal_map);
   bool sync_write_goal_states(const std::map<uint8_t, ServoState> & motor_states);
@@ -56,6 +57,7 @@ private:
 
   // Register definitions
   static constexpr uint8_t REG_TORQUE_ENABLE = 40;
+  static constexpr uint8_t REG_HOMING_OFFSET = 31;
   static constexpr uint8_t REG_GOAL_POSITION = 42;
   static constexpr uint8_t REG_GOAL_TIME = 44;
   static constexpr uint8_t REG_GOAL_SPEED = 46;

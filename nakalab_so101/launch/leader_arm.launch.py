@@ -19,11 +19,16 @@ def generate_launch_description():
         get_package_share_directory('nakalab_so101'),
         'params', 'd435.yaml'
     )
+    default_calibration_root = os.path.join(
+        get_package_share_directory('nakalab_so101_description'),
+        'calibration'
+    )
 
 
     # launch configuration
     device = LaunchConfiguration('device')
     camera_type = LaunchConfiguration('camera_type')
+    calibration_file = LaunchConfiguration('calibration_file')
 
 
     # launch arguments
@@ -37,6 +42,11 @@ def generate_launch_description():
     )
     ld.add_action(declare_device)
     ld.add_action(declare_camera_type)
+    declare_calibration_file = DeclareLaunchArgument(
+        'calibration_file', default_value='',
+        description='Optional SO-101 follower calibration JSON path.'
+    )
+    ld.add_action(declare_calibration_file)
 
 
     # nodes
@@ -45,7 +55,11 @@ def generate_launch_description():
         executable='follower_arm_driver_node',
         output='screen',
         emulate_tty=True,
-        parameters=[{'device': device}]
+        parameters=[{
+            'device': device,
+            'calibration_file': calibration_file,
+            'calibration_root': default_calibration_root,
+        }]
     )
     realsense_d435 = Node(
         package='realsense2_camera',

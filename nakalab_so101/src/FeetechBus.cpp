@@ -152,6 +152,20 @@ std::optional<std::vector<uint8_t>> FeetechBus::read_register(uint8_t motor_id, 
     return read_packet();
 }
 
+std::optional<int> FeetechBus::read_homing_offset(uint8_t motor_id)
+{
+    const auto response = read_register(motor_id, REG_HOMING_OFFSET, 2);
+    if (!response || response->size() != 2) {
+        return std::nullopt;
+    }
+
+    const uint16_t raw_value =
+        static_cast<uint16_t>((*response)[0]) |
+        (static_cast<uint16_t>((*response)[1]) << 8);
+    const int magnitude = static_cast<int>(raw_value & 0x07FF);
+    return raw_value & 0x0800 ? -magnitude : magnitude;
+}
+
 bool FeetechBus::sync_write_goal_positions(const std::map<uint8_t, int16_t>& motor_goal_map)
 {
     std::vector<uint8_t> params;

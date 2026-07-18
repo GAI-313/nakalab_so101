@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot name="so101_follower_arm">
+  <group name="so101_follower">
+    <chain base_link="arm_base_link" tip_link="gripper_frame_link"/>
+  </group>
+  <group name="so101_gripper">
+    <joint name="gripper"/>
+  </group>
+  <group name="so101">
+    <group name="so101_follower"/>
+    <group name="so101_gripper"/>
+  </group>
+
+  <!-- zero position -->
+  <group_state name="zero" group="so101_follower">
+    <joint name="shoulder_pan" value="0"/>
+    <joint name="shoulder_lift" value="0"/>
+    <joint name="elbow_flex" value="0"/>
+    <joint name="wrist_flex" value="0"/>
+    <joint name="wrist_roll" value="0"/>
+  </group_state>
+  <group_state name="zero" group="so101_gripper">
+    <joint name="gripper" value="0"/>
+  </group_state>
+  <group_state name="zero" group="so101">
+    <joint name="shoulder_pan" value="0"/>
+    <joint name="shoulder_lift" value="0"/>
+    <joint name="elbow_flex" value="0"/>
+    <joint name="wrist_flex" value="0"/>
+    <joint name="wrist_roll" value="0"/>
+    <joint name="gripper" value="0"/>
+  </group_state>
+
+  <!-- home position -->
+  <group_state name="home" group="so101">
+    <joint name="shoulder_pan" value="-0.01380582709097077"/>
+    <joint name="shoulder_lift" value="-1.7380002326744315"/>
+    <joint name="elbow_flex" value="1.4649516524307873"/>
+    <joint name="wrist_flex" value="1.3008157081270237"/>
+    <joint name="wrist_roll" value="-1.5677283652191252"/>
+    <joint name="gripper" value="0.006135923151542565"/>
+  </group_state>
+  <group_state name="home" group="so101_follower">
+    <joint name="shoulder_pan" value="-0.01380582709097077"/>
+    <joint name="shoulder_lift" value="-1.7380002326744315"/>
+    <joint name="elbow_flex" value="1.4649516524307873"/>
+    <joint name="wrist_flex" value="1.3008157081270237"/>
+    <joint name="wrist_roll" value="-1.5677283652191252"/>
+  </group_state>
+
+  <end_effector name="so101_end_effector" parent_link="gripper_link"
+                group="so101_gripper" parent_group="so101_follower"/>
+
+  <disable_collisions link1="world" link2="arm_base_link" reason="Adjacent"/>
+  <disable_collisions link1="arm_base_link" link2="shoulder_link" reason="Adjacent"/>
+  <disable_collisions link1="shoulder_link" link2="upper_arm_link" reason="Adjacent"/>
+  <disable_collisions link1="upper_arm_link" link2="lower_arm_link" reason="Adjacent"/>
+  <disable_collisions link1="lower_arm_link" link2="wrist_link" reason="Adjacent"/>
+  <disable_collisions link1="wrist_link" link2="gripper_link" reason="Adjacent"/>
+  <disable_collisions link1="gripper_link" link2="gripper_frame_link" reason="Adjacent"/>
+  <disable_collisions link1="gripper_link" link2="moving_jaw_so101_v1_link" reason="Adjacent"/>
+</robot>

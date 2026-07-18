@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>nakalab_so101_moveit</name>
+  <version>0.0.0</version>
+  <description>Move to follower arm using Moveit.</description>
+  <maintainer email="nakatogawagai@gmail.com">GAI-313</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>ament_index_python</depend>
+  <depend>launch</depend>
+  <depend>launch_ros</depend>
+  <depend>moveit_configs_utils</depend>
+  <depend>moveit_planners_ompl</depend>
+  <depend>moveit_ros</depend>
+  <depend>moveit_ros_move_group</depend>
+  <depend>moveit_ros_visualization</depend>
+  <depend>moveit_simple_controller_manager</depend>
+  <depend>pick_ik</depend>
+  <depend>robot_state_publisher</depend>
+  <depend>rviz2</depend>
+  <depend>xacro</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>launch_testing</test_depend>
+  <test_depend>launch_testing_ament_cmake</test_depend>
+  <test_depend>controller_manager_msgs</test_depend>
+  <test_depend>control_msgs</test_depend>
+  <test_depend>geometry_msgs</test_depend>
+  <test_depend>moveit_msgs</test_depend>
+  <test_depend>rclpy</test_depend>
+  <test_depend>sensor_msgs</test_depend>
+
+  <depend>nakalab_so101_py</depend>
+  <depend>nakalab_so101_controller</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
