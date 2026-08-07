@@ -7,7 +7,7 @@
     ```mermaid
     flowchart TD
         A{Power} -->|12V Power| B(SO-101 Follower Arm)
-        B <-->|USB Type-C| C(Let me think)  
+        B <-->|USB Type-C| C(Your PC)  
     ```
 
 1. **アームのデバイス権限を昇格させる**<br>
