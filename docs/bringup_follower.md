@@ -49,3 +49,16 @@ ros2 run nakalab_so101 follower_arm_driver_node --ros-args \
 -p device:=/dev/ttyACM0 \
 -r /follower/joint_commands:=<任意のトピック名>
 ```
+　また，フォロワーアームの関節情報はデフォルトで [sensor_msgs/msg/JointState](https://docs.ros.org/en/noetic/api/sensor_msgs/html/msg/JointState.html) `/follower/joint_states` からパブリッシュされます．．以下のコマンドのようにこのトピックをリマッピングすることで任意のトピックからアームの関節情報を取得できます．
+```bash
+ros2 run nakalab_so101 follower_arm_driver_node --ros-args \
+-p device:=/dev/ttyACM0 \
+-r /follower/joint_states:=<任意のトピック名>
+```
+
+## カメラを起動する方法
+
+　Realsense D435 カメラをフォロワーアームに取り付けている場合，`follower_arm_driver_node` の他に以下のコマンドを実行して Realsense カメラを起動します．
+```bash
+ros2 launch nakalab_realsense d435_launch.py camera_name:=so101_camera
+```

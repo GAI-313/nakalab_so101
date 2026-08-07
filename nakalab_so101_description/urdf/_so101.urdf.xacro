@@ -345,8 +345,8 @@
     <xacro:if value="${camera_type == 'd435'}">
         <xacro:include filename="$(find nakalab_realsense)/urdf/_d435.urdf.xacro" />
 
-        <xacro:sensor_d435 parent="d435_mounter_link" name="so101_camera" use_nominal_extrinsics="true">
-            <origin xyz="0.005 0.0025 0.017" rpy="3.14159 2.75 0.04"/>
+        <xacro:sensor_d435 parent="d435_mounter_link" name="so101_camera" use_nominal_extrinsics="false">
+            <origin xyz="0.005 0.011 0.017" rpy="3.14159 2.725 0.04"/>
         </xacro:sensor_d435>
 
         <link name="d435_mounter_link">
