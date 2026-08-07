@@ -35,7 +35,12 @@ public:
   // High-level commands
   bool write_register(uint8_t motor_id, uint8_t address, const std::vector<uint8_t> & data);
   std::optional<std::vector<uint8_t>> read_register(uint8_t motor_id, uint8_t address, uint8_t length);
+  std::optional<uint8_t> read_u8(uint8_t motor_id, uint8_t address);
+  std::optional<uint16_t> read_u16(uint8_t motor_id, uint8_t address);
+  bool write_u8(uint8_t motor_id, uint8_t address, uint8_t value);
+  bool write_u16(uint8_t motor_id, uint8_t address, uint16_t value);
   std::optional<int> read_homing_offset(uint8_t motor_id);
+  bool write_homing_offset(uint8_t motor_id, int value);
 
   bool sync_write_goal_positions(const std::map<uint8_t, int16_t> & motor_goal_map);
   bool sync_write_goal_states(const std::map<uint8_t, ServoState> & motor_states);
@@ -44,6 +49,8 @@ public:
   std::map<uint8_t, ServoState> sync_read_present_states(const std::vector<uint8_t> & motor_ids);
 
   void enable_torque(const std::vector<uint8_t> & motor_ids, bool enable);
+  void unlock_eeprom(const std::vector<uint8_t> & motor_ids);
+  void lock_eeprom(const std::vector<uint8_t> & motor_ids);
 
 private:
   // Instruction definitions
@@ -56,11 +63,16 @@ private:
   static constexpr uint8_t INST_SYNC_WRITE = 0x83;
 
   // Register definitions
+  static constexpr uint8_t REG_MIN_POSITION_LIMIT = 9;
+  static constexpr uint8_t REG_MAX_POSITION_LIMIT = 11;
+  static constexpr uint8_t REG_PHASE = 18;
   static constexpr uint8_t REG_TORQUE_ENABLE = 40;
   static constexpr uint8_t REG_HOMING_OFFSET = 31;
+  static constexpr uint8_t REG_OPERATING_MODE = 33;
   static constexpr uint8_t REG_GOAL_POSITION = 42;
   static constexpr uint8_t REG_GOAL_TIME = 44;
   static constexpr uint8_t REG_GOAL_SPEED = 46;
+  static constexpr uint8_t REG_LOCK = 55;
   static constexpr uint8_t REG_PRESENT_POSITION = 56;
   static constexpr uint8_t REG_PRESENT_SPEED = 58;
   static constexpr uint8_t REG_PRESENT_LOAD = 60;

@@ -1,4 +1,5 @@
 #include "nakalab_so101/FeetechBus.hpp"
+#include <cstdlib>
 #include <vector>
 #include <numeric>
 #include <stdexcept>
@@ -152,18 +153,60 @@ std::optional<std::vector<uint8_t>> FeetechBus::read_register(uint8_t motor_id, 
     return read_packet();
 }
 
-std::optional<int> FeetechBus::read_homing_offset(uint8_t motor_id)
+std::optional<uint8_t> FeetechBus::read_u8(uint8_t motor_id, uint8_t address)
 {
-    const auto response = read_register(motor_id, REG_HOMING_OFFSET, 2);
+    const auto response = read_register(motor_id, address, 1);
+    if (!response || response->size() != 1) {
+        return std::nullopt;
+    }
+    return (*response)[0];
+}
+
+std::optional<uint16_t> FeetechBus::read_u16(uint8_t motor_id, uint8_t address)
+{
+    const auto response = read_register(motor_id, address, 2);
     if (!response || response->size() != 2) {
         return std::nullopt;
     }
+    return static_cast<uint16_t>((*response)[0]) |
+           (static_cast<uint16_t>((*response)[1]) << 8);
+}
 
+bool FeetechBus::write_u8(uint8_t motor_id, uint8_t address, uint8_t value)
+{
+    return write_register(motor_id, address, {value});
+}
+
+bool FeetechBus::write_u16(uint8_t motor_id, uint8_t address, uint16_t value)
+{
+    return write_register(
+        motor_id, address,
+        {
+            static_cast<uint8_t>(value & 0xFF),
+            static_cast<uint8_t>((value >> 8) & 0xFF)
+        });
+}
+
+std::optional<int> FeetechBus::read_homing_offset(uint8_t motor_id)
+{
+    const auto raw_value = read_u16(motor_id, REG_HOMING_OFFSET);
+    if (!raw_value) {
+        return std::nullopt;
+    }
+
+    const int magnitude = static_cast<int>(*raw_value & 0x07FF);
+    return *raw_value & 0x0800 ? -magnitude : magnitude;
+}
+
+bool FeetechBus::write_homing_offset(uint8_t motor_id, int value)
+{
+    const int magnitude = std::abs(value);
+    if (magnitude > 0x07FF) {
+        return false;
+    }
     const uint16_t raw_value =
-        static_cast<uint16_t>((*response)[0]) |
-        (static_cast<uint16_t>((*response)[1]) << 8);
-    const int magnitude = static_cast<int>(raw_value & 0x07FF);
-    return raw_value & 0x0800 ? -magnitude : magnitude;
+        static_cast<uint16_t>((value < 0 ? 0x0800 : 0x0000) | magnitude);
+    return write_u16(motor_id, REG_HOMING_OFFSET, raw_value);
 }
 
 bool FeetechBus::sync_write_goal_positions(const std::map<uint8_t, int16_t>& motor_goal_map)
@@ -235,6 +278,20 @@ void FeetechBus::enable_torque(const std::vector<uint8_t>& motor_ids, bool enabl
 {
     for (const auto& id : motor_ids) {
         write_register(id, REG_TORQUE_ENABLE, {static_cast<uint8_t>(enable ? 1 : 0)});
+    }
+}
+
+void FeetechBus::unlock_eeprom(const std::vector<uint8_t>& motor_ids)
+{
+    for (const auto& id : motor_ids) {
+        write_u8(id, REG_LOCK, 0);
+    }
+}
+
+void FeetechBus::lock_eeprom(const std::vector<uint8_t>& motor_ids)
+{
+    for (const auto& id : motor_ids) {
+        write_u8(id, REG_LOCK, 1);
     }
 }
 

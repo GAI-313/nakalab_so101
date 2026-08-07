@@ -57,6 +57,13 @@ ament_target_dependencies(follower_arm_driver_node ament_index_cpp rclcpp sensor
 target_link_libraries(follower_arm_driver_node nakalab_so101_feetech_bus nakalab_so101_calibration)
 
 #
+# Calibration Node
+#
+add_executable(calibrate src/calibrate_node.cpp)
+ament_target_dependencies(calibrate ament_index_cpp rclcpp)
+target_link_libraries(calibrate nakalab_so101_feetech_bus)
+
+#
 # Install targets
 #
 install(
@@ -65,6 +72,7 @@ install(
     nakalab_so101_calibration
     leader_arm_driver_node
     follower_arm_driver_node
+    calibrate
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
