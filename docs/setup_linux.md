@@ -13,7 +13,7 @@
     ```
 1. このリポジトリを `src` ディレクトリ内にクローンします．
     ```bash
-    git clone -b humble https://github.com/GAI-313/nakalab_so101.git
+    git clone -b devel/linux https://github.com/GAI-313/nakalab_so101.git
     ```
 1. `nakalab_so101` が依存するパッケージを `src` ディレクトリ内にクローンします．
     ```bash
