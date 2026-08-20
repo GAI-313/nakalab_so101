@@ -1,9 +1,9 @@
 ## Build on Linux
-１．ROS2 をインストールし，以下のコマンドを実行してください．
+1. ROS2 をインストールし，以下のコマンドを実行してください．
     ```bash
     source /opt/ros/humble/setup.bash
     ```
-１．ROS2 ワークスペースを作成します．
+1. ROS2 ワークスペースを作成します．
     ```bash
     cd && mkdir -p ~/colcon_ws/src
     ```
@@ -11,7 +11,7 @@
     ```bash
     cd ~/colcon_ws/src
     ```
-１．このリポジトリを `src` ディレクトリ内にクローンします．
+1. このリポジトリを `src` ディレクトリ内にクローンします．
     ```bash
     git clone -b humble https://github.com/GAI-313/nakalab_so101.git
     ```

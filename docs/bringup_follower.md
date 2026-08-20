@@ -62,3 +62,13 @@ ros2 run nakalab_so101 follower_arm_driver_node --ros-args \
 ```bash
 ros2 launch nakalab_realsense d435_launch.py camera_name:=so101_camera
 ```
+
+## Moveit を起動する方法
+　次のコマンドを別のターミナルで起動します．
+```bash
+ros2 launch nakalab_so101_moveit moveit.launch.py
+```
+カメラを使用する場合は `camera_type:=d435` と追加します．
+```bash
+ros2 launch nakalab_so101_moveit moveit.launch.py camera_type:=d435
+```

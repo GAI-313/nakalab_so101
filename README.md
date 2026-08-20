@@ -10,7 +10,7 @@ SO-101 Driver for ROS2
 
 ## Tutorials
 
-1. [SO-101 をキャリブレーションする方法](/doc/calibration.md)
+1. [SO-101 をキャリブレーションする方法](docs/calibration.md)
 
 
 <!--
