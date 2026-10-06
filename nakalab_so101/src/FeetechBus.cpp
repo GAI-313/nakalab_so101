@@ -8,6 +8,30 @@
 namespace nakalab_so101
 {
 
+namespace
+{
+std::string describe_servo_error(uint8_t error)
+{
+  // 異常ビットの定義: https://github.com/ftservo/FTServo_Python/blob/main/scservo_sdk/protocol_packet_handler.py
+  std::string description;
+  const auto append = [&description, error](uint8_t mask, const char * label) {
+      if ((error & mask) != 0) {
+        if (!description.empty()) {
+          description += ", ";
+        }
+        description += label;
+      }
+    };
+  append(1, "入力電圧異常");
+  append(2, "角度センサー異常");
+  append(4, "過熱");
+  append(8, "過電流");
+  append(32, "過負荷");
+  append(0xD0, "未定義の異常ビット");
+  return description;
+}
+}
+
 FeetechBus::FeetechBus(const std::string & port, int baudrate)
 : port_(port), baudrate_(baudrate)
 {
@@ -78,7 +102,7 @@ bool FeetechBus::write_packet(uint8_t motor_id, uint8_t instruction, const std::
   return true;
 }
 
-std::optional<std::vector<uint8_t>> FeetechBus::read_packet()
+std::optional<std::vector<uint8_t>> FeetechBus::read_packet(int expected_id, int expected_size)
 {
   std::lock_guard<std::mutex> lock(bus_mutex_);
   try {
@@ -98,10 +122,6 @@ std::optional<std::vector<uint8_t>> FeetechBus::read_packet()
     serial_.ReadByte(length, 10);
     serial_.ReadByte(error, 10);
 
-    if (error != 0) {
-        // Error from servo
-    }
-    
     if (length < 2) {
         return std::nullopt;
     }
@@ -122,7 +142,22 @@ std::optional<std::vector<uint8_t>> FeetechBus::read_packet()
         std::cerr << "Checksum error on read." << std::endl;
         return std::nullopt;
     }
-    
+
+    if ((expected_id >= 0 && id != expected_id) ||
+        (expected_size >= 0 && params_and_checksum.size() != static_cast<size_t>(expected_size))) {
+        std::cerr << "サーボ応答が不正です: id=" << static_cast<int>(id)
+                  << " expected_id=" << expected_id << " error=" << static_cast<int>(error)
+                  << " size=" << params_and_checksum.size() << std::endl;
+        return std::nullopt;
+    }
+
+    if (error != 0) {
+        std::cerr << "サーボが異常を報告しました: id=" << static_cast<int>(id)
+                  << " error=" << static_cast<int>(error)
+                  << " (" << describe_servo_error(error) << ")" << std::endl;
+        return std::nullopt;
+    }
+
     return params_and_checksum;
 
   } catch (const std::exception &) {
@@ -141,8 +176,7 @@ bool FeetechBus::write_register(uint8_t motor_id, uint8_t address, const std::ve
     if (!write_packet(motor_id, INST_WRITE, params)) {
         return false;
     }
-    read_packet();
-    return true;
+    return read_packet(motor_id, 0).has_value();
 }
 
 std::optional<std::vector<uint8_t>> FeetechBus::read_register(uint8_t motor_id, uint8_t address, uint8_t length)
@@ -150,7 +184,7 @@ std::optional<std::vector<uint8_t>> FeetechBus::read_register(uint8_t motor_id, 
     if (!write_packet(motor_id, INST_READ, {address, length})) {
         return std::nullopt;
     }
-    return read_packet();
+    return read_packet(motor_id, length);
 }
 
 std::optional<uint8_t> FeetechBus::read_u8(uint8_t motor_id, uint8_t address)
@@ -251,7 +285,8 @@ std::map<uint8_t, int16_t> FeetechBus::sync_read_present_positions(const std::ve
     for (const auto& id : motor_ids) {
         auto response = read_register(id, REG_PRESENT_POSITION, 2);
         if (response && response->size() == 2) {
-            int16_t pos = ((*response)[1] << 8) | (*response)[0];
+            const uint16_t raw = ((*response)[1] << 8) | (*response)[0];
+            const int16_t pos = raw & 0x8000 ? -static_cast<int>(raw & 0x7FFF) : raw;
             positions[id] = pos;
         }
     }
@@ -265,7 +300,9 @@ std::map<uint8_t, ServoState> FeetechBus::sync_read_present_states(const std::ve
         auto response = read_register(id, REG_PRESENT_POSITION, 6);
         if (response && response->size() == 6) {
             ServoState state;
-            state.position = ((*response)[1] << 8) | (*response)[0];
+            const uint16_t raw_position = ((*response)[1] << 8) | (*response)[0];
+            state.position = raw_position & 0x8000 ?
+                -static_cast<int>(raw_position & 0x7FFF) : raw_position;
             state.speed = ((*response)[3] << 8) | (*response)[2];
             state.load = ((*response)[5] << 8) | (*response)[4];
             states[id] = state;

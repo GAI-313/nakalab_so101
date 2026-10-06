@@ -21,6 +21,7 @@ MOTOR_IDS = {
     'gripper': 6,
 }
 HALF_TURN_POSITION = 2047
+CENTER_POSITION_TOLERANCE = 10
 POSITION_MODE = 0
 PHASE_FEEDBACK_BIT = 0x10
 
@@ -163,9 +164,7 @@ class SO101Calibrator:
                 'Move the arm to the middle of its range of motion, '
                 'then press Enter.'
             )
-            center_positions = self.read_required_positions(bus)
-            homing_offsets = self.compute_homing_offsets(center_positions)
-            self.write_homing_offsets(bus, homing_offsets)
+            homing_offsets = self.calibrate_homing_offsets(bus)
 
             self.output(
                 'Move each joint through its full range of motion. '
@@ -257,10 +256,49 @@ class SO101Calibrator:
         center_positions: Dict[str, int],
     ) -> Dict[str, int]:
         """Compute homing offsets from middle-pose positions."""
-        return {
+        offsets = {
             name: int(position) - HALF_TURN_POSITION
             for name, position in center_positions.items()
         }
+        for offset in offsets.values():
+            FeetechBus.encode_homing_offset(offset)
+        return offsets
+
+    def calibrate_homing_offsets(self, bus: FeetechBus) -> Dict[str, int]:
+        """旧補正を除去して基準姿勢を計測し，補正後の位置も検証する．"""
+        for name, motor_id in MOTOR_IDS.items():
+            status = bus.write_homing_offset(motor_id, 0)
+            self._check_status(status, motor_id, 'reset homing offset')
+            for address, value in (
+                (FeetechBus.REG_MIN_POSITION_LIMIT, 0),
+                (FeetechBus.REG_MAX_POSITION_LIMIT,
+                 FeetechBus.STS3215_RESOLUTION - 1),
+            ):
+                status = bus.write_u16(motor_id, address, value)
+                self._check_status(status, motor_id, 'reset position limit')
+                if bus.read_u16(motor_id, address) != value:
+                    raise RuntimeError(f'{name}: 可動範囲のリセットを確認できません．')
+            if bus.read_homing_offset(motor_id) != 0:
+                raise RuntimeError(f'{name}: オフセットのリセットを確認できません．')
+
+        center_positions = self.read_required_positions(bus)
+        if any(
+            not 0 <= position < FeetechBus.STS3215_RESOLUTION
+            for position in center_positions.values()
+        ):
+            raise RuntimeError('基準位置が 0〜4095 の範囲外です．')
+        homing_offsets = self.compute_homing_offsets(center_positions)
+        self.write_homing_offsets(bus, homing_offsets)
+
+        for name, position in self.read_required_positions(bus).items():
+            if abs(position - HALF_TURN_POSITION) > CENTER_POSITION_TOLERANCE:
+                raise RuntimeError(
+                    f'{name}: 補正後の基準位置が中央から外れています '
+                    f'({position}, 中央 {HALF_TURN_POSITION}, '
+                    f'許容差 {CENTER_POSITION_TOLERANCE})．'
+                    '基準姿勢を保持してキャリブレーションをやり直してください．'
+                )
+        return homing_offsets
 
     def write_homing_offsets(
         self,
@@ -272,6 +310,8 @@ class SO101Calibrator:
             motor_id = MOTOR_IDS[name]
             status = bus.write_homing_offset(motor_id, homing_offset)
             self._check_status(status, motor_id, 'write homing offset')
+            if bus.read_homing_offset(motor_id) != homing_offset:
+                raise RuntimeError(f'{name}: オフセットの書き込みを確認できません．')
 
     def record_ranges_of_motion(
         self,

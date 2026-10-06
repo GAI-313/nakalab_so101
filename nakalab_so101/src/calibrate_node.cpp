@@ -1,6 +1,7 @@
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "nakalab_so101/FeetechBus.hpp"
+#include "nakalab_so101/HomingCalibration.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -17,7 +18,6 @@
 
 namespace
 {
-constexpr int kHalfTurnPosition = 2047;
 constexpr uint8_t kRegMinPositionLimit = 9;
 constexpr uint8_t kRegMaxPositionLimit = 11;
 constexpr uint8_t kRegPhase = 18;
@@ -123,9 +123,7 @@ public:
 
       wait_for_enter(
         "Move the arm to the middle of its range of motion, then press Enter.");
-      const auto center_positions = read_required_positions(bus);
-      const auto homing_offsets = compute_homing_offsets(center_positions);
-      write_homing_offsets(bus, homing_offsets);
+      const auto homing_offsets = nakalab_so101::calibrate_homing_offsets(bus, kMotorIds);
 
       std::cout << "Move each joint through its full range of motion. "
                 << "Press Enter when finished." << std::endl;
@@ -249,26 +247,6 @@ private:
       throw std::runtime_error(message);
     }
     return positions;
-  }
-
-  std::map<std::string, int> compute_homing_offsets(
-    const std::map<std::string, int> & center_positions)
-  {
-    std::map<std::string, int> homing_offsets;
-    for (const auto & [name, position] : center_positions) {
-      homing_offsets[name] = position - kHalfTurnPosition;
-    }
-    return homing_offsets;
-  }
-
-  void write_homing_offsets(
-    nakalab_so101::FeetechBus & bus,
-    const std::map<std::string, int> & homing_offsets)
-  {
-    for (const auto & [name, homing_offset] : homing_offsets) {
-      const auto motor_id = kMotorIds.at(name);
-      require(bus.write_homing_offset(motor_id, homing_offset), motor_id, "write homing offset");
-    }
   }
 
   std::map<std::string, std::map<std::string, int>> record_ranges_of_motion(

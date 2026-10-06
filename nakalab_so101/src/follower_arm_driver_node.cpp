@@ -37,16 +37,25 @@ public:
     this->declare_parameter<std::string>("calibration_file", "");
     this->declare_parameter<std::string>("calibration_root", default_calibration_root());
     this->declare_parameter<bool>("hold_current_position_on_startup", true);
+    this->declare_parameter<bool>("read_only", true);
 
     auto device_port = this->get_parameter("device").as_string();
     auto baudrate = this->get_parameter("baudrate").as_int();
     max_speed_ = this->get_parameter("max_speed").as_int();
+    read_only_ = this->get_parameter("read_only").as_bool();
     hold_current_position_on_startup_ =
       this->get_parameter("hold_current_position_on_startup").as_bool();
 
     load_calibration(
       this->get_parameter("calibration_file").as_string(),
       this->get_parameter("calibration_root").as_string());
+
+    if (!read_only_ && (!calibration_loaded_ || !hold_current_position_on_startup_)) {
+      throw std::runtime_error("制御には校正ファイルと起動時の現在位置保持が必要です．");
+    }
+    if (max_speed_ <= 0 || max_speed_ > 32767) {
+      throw std::runtime_error("max_speed は 1〜32767 を指定してください．");
+    }
 
     if (device_port.empty()) {
       throw std::runtime_error("Parameter 'device' must be set!");
@@ -59,17 +68,34 @@ public:
     }
 
     const auto motor_ids = get_all_motor_ids();
-    bus_->enable_torque(motor_ids, false);
     verify_calibration();
-    hold_current_position_on_startup(motor_ids);
-    bus_->enable_torque(get_all_motor_ids(), true);
+    inspect_startup_state(motor_ids);
+    if (!read_only_) {
+      try {
+        torque_control_active_ = true;
+        hold_current_position_on_startup(motor_ids);
+        for (const auto id : motor_ids) {
+          if (!bus_->write_u8(id, 40, 1) || bus_->read_u8(id, 40) != 1) {
+            throw std::runtime_error("トルク有効化の読み戻しに失敗しました．");
+          }
+        }
+      } catch (...) {
+        bus_->enable_torque(motor_ids, false);
+        throw;
+      }
+    } else {
+      RCLCPP_INFO(
+        get_logger(), "read_only=true: 目標位置・トルクは書き込まず，状態だけを配信します．");
+    }
 
     joint_state_pub_ = this->create_publisher<sensor_msgs::msg::JointState>(
       "follower/joint_states",
       10);
-    joint_cmd_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
-      "follower/joint_commands", 10,
-      std::bind(&FollowerArmDriverNode::joint_cmd_callback, this, std::placeholders::_1));
+    if (!read_only_) {
+      joint_cmd_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
+        "follower/joint_commands", 10,
+        std::bind(&FollowerArmDriverNode::joint_cmd_callback, this, std::placeholders::_1));
+    }
 
     timer_ = this->create_wall_timer(
       std::chrono::milliseconds(20), // 50Hz
@@ -81,7 +107,9 @@ public:
   ~FollowerArmDriverNode()
   {
     if (bus_ && bus_->is_connected()) {
-      bus_->enable_torque(get_all_motor_ids(), false);
+      if (torque_control_active_) {
+        bus_->enable_torque(get_all_motor_ids(), false);
+      }
       bus_->disconnect();
     }
   }
@@ -89,11 +117,15 @@ public:
 private:
   void joint_cmd_callback(const sensor_msgs::msg::JointState::SharedPtr msg)
   {
-    if (!bus_->is_connected()) {
+    if (read_only_ || !bus_->is_connected()) {
       return;
     }
 
     max_speed_ = this->get_parameter("max_speed").as_int();
+    if (max_speed_ <= 0 || max_speed_ > 32767) {
+      RCLCPP_ERROR(get_logger(), "max_speed が範囲外のため指令を拒否します．");
+      return;
+    }
 
     bool use_velocity = (msg->velocity.size() == msg->name.size());
     std::map<uint8_t, nakalab_so101::ServoState> goal_states;
@@ -101,12 +133,22 @@ private:
     for (size_t i = 0; i < msg->name.size(); ++i) {
       if (i >= msg->position.size()) {
         RCLCPP_WARN(this->get_logger(), "Ignoring joint command with missing position values");
-        break;
+        return;
       }
 
       const auto & name = msg->name[i];
       if (motor_ids_.count(name)) {
         uint8_t mid = motor_ids_.at(name);
+
+        const auto & limits = position_limits_.at(mid);
+        if (!std::isfinite(msg->position[i]) ||
+          msg->position[i] < pos_to_rad(limits.first) ||
+          msg->position[i] > pos_to_rad(limits.second) ||
+          (use_velocity && !std::isfinite(msg->velocity[i])))
+        {
+          RCLCPP_ERROR(get_logger(), "%s: 校正済み可動範囲外または不正な指令を拒否します．", name.c_str());
+          return;
+        }
 
         nakalab_so101::ServoState state;
         state.position = rad_to_pos(msg->position[i]);
@@ -114,7 +156,7 @@ private:
         if (use_velocity) {
           // 1 rad/s ~= 651 steps/s (from Python driver)
           double vel = std::abs(msg->velocity[i] * 651.0);
-          state.speed = std::min(32767, static_cast<int>(vel));
+          state.speed = static_cast<int>(std::min(32767.0, vel));
         } else {
           state.speed = max_speed_;
         }
@@ -141,6 +183,13 @@ private:
 
     for (const auto & [id, state] : states) {
       if (id_to_name_.count(id)) {
+        if (state.position < 0 || state.position > 4095) {
+          RCLCPP_ERROR_THROTTLE(
+            get_logger(), *get_clock(), 2000,
+            "id=%u: 単回転範囲外の位置 %d を検出しました．状態配信を中止します．",
+            id, state.position);
+          return;
+        }
         msg.name.push_back(id_to_name_.at(id));
         msg.position.push_back(pos_to_rad(state.position));
 
@@ -175,7 +224,7 @@ private:
 
   int16_t rad_to_pos(double rad)
   {
-    int val = static_cast<int>(rad * 4096.0 / (2.0 * M_PI) + 2048.0);
+    int val = static_cast<int>(std::lround(rad * 4096.0 / (2.0 * M_PI) + 2048.0));
     return std::max(0, std::min(4095, val));
   }
 
@@ -233,28 +282,99 @@ private:
       "Verified calibration JSON against motor homing offsets; driver does not write calibration");
   }
 
-  void hold_current_position_on_startup(const std::vector<uint8_t> & motor_ids)
+  void inspect_startup_state(const std::vector<uint8_t> & motor_ids)
   {
-    if (!hold_current_position_on_startup_) {
-      return;
-    }
-
     const auto states = bus_->sync_read_present_states(motor_ids);
     if (states.size() != motor_ids.size()) {
-      throw std::runtime_error("Failed to read every motor position before enabling torque");
+      throw std::runtime_error("起動時に全関節の状態を読み取れません．");
+    }
+    for (const auto id : motor_ids) {
+      const auto minimum = bus_->read_u16(id, 9);
+      const auto maximum = bus_->read_u16(id, 11);
+      const auto mode = bus_->read_u8(id, 33);
+      const auto phase = bus_->read_u8(id, 18);
+      const auto torque = bus_->read_u8(id, 40);
+      const auto goal = bus_->read_u16(id, 42);
+      if (!minimum || !maximum || !mode || !phase || !torque || !goal) {
+        throw std::runtime_error("起動時にサーボ設定を読み取れません．");
+      }
+      position_limits_[id] = {*minimum, *maximum};
+      const auto & state = states.at(id);
+      RCLCPP_INFO(
+        get_logger(),
+        "%s id=%u raw=%d rad=%.6f goal=%u limits=[%u,%u] torque=%u mode=%u phase=%u",
+        id_to_name_.at(id).c_str(), id, state.position, pos_to_rad(state.position),
+        *goal, *minimum, *maximum, *torque, *mode, *phase);
+      if (read_only_) {
+        continue;
+      }
+      const auto prefix = id_to_name_.at(id) + " id=" + std::to_string(id) + ": ";
+      if (*minimum >= *maximum || *maximum > 4095) {
+        throw std::runtime_error(
+                prefix + "可動範囲の設定が不正です: limits=[" +
+                std::to_string(*minimum) + "," + std::to_string(*maximum) + "]");
+      }
+      if (*mode != 0 || (*phase & 0x10) != 0) {
+        throw std::runtime_error(
+                prefix + "単回転の位置制御設定ではありません: mode=" +
+                std::to_string(*mode) + " phase=" + std::to_string(*phase));
+      }
+      if (*torque != 0) {
+        throw std::runtime_error(
+                prefix + "トルクが既に有効なため設定を変更せず終了します: torque=" +
+                std::to_string(*torque));
+      }
+      if (state.position < *minimum || state.position > *maximum) {
+        const int excess = state.position < *minimum ?
+          *minimum - state.position : state.position - *maximum;
+        throw std::runtime_error(
+                prefix + "現在位置が可動範囲外です: raw=" + std::to_string(state.position) +
+                " limits=[" + std::to_string(*minimum) + "," + std::to_string(*maximum) +
+                "] 超過=" + std::to_string(excess) + " ステップ (" +
+                std::to_string(excess * 360.0 / 4096.0) +
+                " 度)．範囲外の保持目標は送信せず，制御を開始しません．");
+      }
+    }
+  }
+
+  void hold_current_position_on_startup(const std::vector<uint8_t> & motor_ids)
+  {
+    const auto states = bus_->sync_read_present_states(motor_ids);
+    if (states.size() != motor_ids.size()) {
+      throw std::runtime_error("現在位置保持の前に全関節の状態を読み取れません．");
     }
 
     std::map<uint8_t, nakalab_so101::ServoState> hold_states;
     for (const auto & [motor_id, state] : states) {
-      hold_states[motor_id] = {state.position, 0, 0};
+      const auto & limits = position_limits_.at(motor_id);
+      if (state.position < limits.first || state.position > limits.second || state.speed != 0) {
+        throw std::runtime_error("現在位置が可動範囲外，または関節が動いているため制御を開始しません．");
+      }
+      hold_states[motor_id] = {state.position, max_speed_, 0};
     }
+
     if (!bus_->sync_write_goal_states(hold_states)) {
       throw std::runtime_error("Failed to synchronize current positions before enabling torque");
     }
 
+    for (const auto & [motor_id, state] : hold_states) {
+      const auto goal = bus_->read_u16(motor_id, 42);
+      if (!goal || *goal != state.position) {
+        throw std::runtime_error("目標位置の読み戻しが現在位置と一致しないため，トルクを有効にしません．");
+      }
+    }
+    const auto confirmed_states = bus_->sync_read_present_states(motor_ids);
+    for (const auto & [motor_id, state] : hold_states) {
+      const auto actual = confirmed_states.find(motor_id);
+      if (actual == confirmed_states.end() || actual->second.speed != 0 ||
+        std::abs(actual->second.position - state.position) > 10)
+      {
+        throw std::runtime_error("起動準備中に姿勢が変わったため，トルクを有効にしません．");
+      }
+    }
     RCLCPP_INFO(
       this->get_logger(),
-      "Synchronized current positions as goal positions before enabling torque");
+      "全関節の目標位置と現在位置を読み戻して確認しました．");
   }
 
   std::vector<uint8_t> get_all_motor_ids()
@@ -272,6 +392,9 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
   int max_speed_;
   bool hold_current_position_on_startup_{true};
+  bool read_only_{true};
+  bool torque_control_active_{false};
+  std::map<uint8_t, std::pair<int, int>> position_limits_;
   nakalab_so101::Calibration calibration_;
   bool calibration_loaded_{false};
 

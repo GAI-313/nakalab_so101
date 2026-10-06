@@ -99,6 +99,102 @@ class FakeCalibrationBus:
         return self.u16_values[(motor_id, address)]
 
 
+class OffsetAwareCalibrationBus(FakeCalibrationBus):
+    """実位置と EEPROM オフセットから現在位置を返す模擬サーボ．"""
+
+    def __init__(self, homing_offsets):
+        """校正前のオフセットと固定した実位置を用意する．"""
+        super().__init__([{motor_id: 2047 for motor_id in MOTOR_IDS.values()}])
+        self.actual_positions = dict(enumerate(
+            [3000, 1300, 2700, 1000, 2500, 1900], start=1,
+        ))
+        self.homing_offsets = dict(homing_offsets)
+
+    def sync_read_present_positions(self, motor_ids):
+        """Feetech の補正済み位置を模擬する．"""
+        self.operations.append(('read_positions', list(motor_ids)))
+        self.position_reads += 1
+        return {
+            motor_id: (
+                self.actual_positions[motor_id] - self.homing_offsets[motor_id]
+            ) % FeetechBus.STS3215_RESOLUTION
+            for motor_id in motor_ids
+        }
+
+
+@pytest.mark.parametrize('initial_offsets', [
+    dict.fromkeys(MOTOR_IDS.values(), 0),
+    dict(enumerate([1000, -500, 750, -1200, 500, -250], start=1)),
+])
+def test_recalibration_keeps_the_same_physical_pose_centered(
+    tmp_path, initial_offsets,
+):
+    """初回・再校正とも，同じ実姿勢を中央に維持する．"""
+    bus = OffsetAwareCalibrationBus(initial_offsets)
+    calibrator = SO101Calibrator(
+        CalibrateConfig('/dev/fake', 'so101_follower', 'repeat', overwrite=True),
+        bus_factory=lambda *_, **__: bus,
+        input_func=lambda _: '',
+        output=lambda _: None,
+        sleep_func=lambda _: None,
+        calibration_root=tmp_path,
+        range_stop_checker=lambda: True,
+        display_ranges=False,
+    )
+
+    for _ in range(2):
+        calibrator.run()
+        positions = bus.sync_read_present_positions(list(MOTOR_IDS.values()))
+        assert positions == dict.fromkeys(MOTOR_IDS.values(), 2047)
+        assert bus.homing_offsets == {
+            motor_id: position - 2047
+            for motor_id, position in bus.actual_positions.items()
+        }
+        assert not bus.connected
+
+
+@pytest.mark.parametrize('failure', ['reset', 'offset', 'feedback', 'missing'])
+def test_invalid_homing_aborts_without_saving(tmp_path, monkeypatch, failure):
+    """書き込み・読み戻し・基準位置の異常時は JSON を保存しない．"""
+    bus = OffsetAwareCalibrationBus(dict.fromkeys(MOTOR_IDS.values(), 500))
+    write_offset = bus.write_homing_offset
+    read_positions = bus.sync_read_present_positions
+
+    def faulty_write(motor_id, value):
+        if failure == 'reset' and value == 0:
+            return None
+        if failure == 'offset' and value != 0:
+            return None
+        return write_offset(motor_id, value)
+
+    def faulty_read(motor_ids):
+        if failure == 'feedback':
+            return {mid: bus.actual_positions[mid] for mid in motor_ids}
+        positions = read_positions(motor_ids)
+        if failure == 'missing':
+            positions.pop(1)
+        return positions
+
+    monkeypatch.setattr(bus, 'write_homing_offset', faulty_write)
+    monkeypatch.setattr(bus, 'sync_read_present_positions', faulty_read)
+    calibrator = SO101Calibrator(
+        CalibrateConfig('/dev/fake', 'so101_follower', 'invalid'),
+        bus_factory=lambda *_, **__: bus,
+        input_func=lambda _: '',
+        output=lambda _: None,
+        calibration_root=tmp_path,
+        range_stop_checker=lambda: True,
+        display_ranges=False,
+    )
+
+    with pytest.raises(RuntimeError):
+        calibrator.run()
+
+    assert not calibrator.calibration_path().exists()
+    assert ('lock_eeprom', list(MOTOR_IDS.values())) in bus.operations
+    assert not bus.connected
+
+
 def sample(**positions):
     """Build a complete position sample keyed by motor id."""
     return {
@@ -255,6 +351,7 @@ def test_run_writes_eeprom_in_order_and_saves_json(tmp_path):
             wrist_roll=2100,
             gripper=1900,
         ),
+        dict.fromkeys(MOTOR_IDS.values(), 2047),
         sample(
             shoulder_pan=1000,
             shoulder_lift=1100,
@@ -293,7 +390,7 @@ def test_run_writes_eeprom_in_order_and_saves_json(tmp_path):
         output=lambda _: None,
         sleep_func=lambda _: None,
         calibration_root=tmp_path,
-        range_stop_checker=lambda: fake_bus.position_reads >= 4,
+        range_stop_checker=lambda: fake_bus.position_reads >= 5,
         display_ranges=False,
     )
 
@@ -312,9 +409,9 @@ def test_run_writes_eeprom_in_order_and_saves_json(tmp_path):
         operations,
         'lock_eeprom',
     )
-    assert first_index(operations, 'lock_eeprom') < first_index(
-        operations,
-        'read_homing_offset',
+    assert first_index(operations, 'lock_eeprom') < max(
+        index for index, operation in enumerate(operations)
+        if operation[0] == 'read_homing_offset'
     )
 
     output_path = tmp_path / 'so101_follower' / 'arm_a.json'

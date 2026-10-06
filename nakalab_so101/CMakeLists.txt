@@ -96,6 +96,17 @@ if(BUILD_TESTING)
   target_link_libraries(test_calibration nakalab_so101_calibration)
   target_include_directories(test_calibration PRIVATE include)
 
+  ament_add_gtest(test_homing_calibration test/test_homing_calibration.cpp)
+  target_include_directories(test_homing_calibration PRIVATE include)
+
+  if(UNIX)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME test_follower_startup
+      COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/test/test_follower_startup.py
+        --driver $<TARGET_FILE:follower_arm_driver_node> -v)
+    set_tests_properties(test_follower_startup PROPERTIES TIMEOUT 45)
+  endif()
+
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)

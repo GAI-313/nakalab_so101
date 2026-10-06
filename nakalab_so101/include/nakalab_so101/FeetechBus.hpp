@@ -30,7 +30,7 @@ public:
 
   // Low-level protocol
   bool write_packet(uint8_t motor_id, uint8_t instruction, const std::vector<uint8_t> & parameters);
-  std::optional<std::vector<uint8_t>> read_packet();
+  std::optional<std::vector<uint8_t>> read_packet(int expected_id = -1, int expected_size = -1);
 
   // High-level commands
   bool write_register(uint8_t motor_id, uint8_t address, const std::vector<uint8_t> & data);

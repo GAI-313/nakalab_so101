@@ -23,9 +23,10 @@
     　次のコマンドでフォロワーアームを起動します．パラメータ `device` にアームのデバイスパスを指定します．
     ```bash
     ros2 run nakalab_so101 follower_arm_driver_node --ros-args \
-    -p device:=/dev/ttyACM0
+    -p device:=/dev/ttyACM0 \
+    -p read_only:=false
     ```
-    起動が成功すると以下のログが出力され，アームのジョイントにトルクがかかります．
+    `read_only:=false` は実機制御を明示的に有効にします．省略時は読み取り専用であり，指令を受け付けずトルクも変更しません．制御前に [読み取り専用での姿勢確認](./calibration.md#observe) を実施してください．制御モードでは起動時の検証に成功すると以下のログが出力され，アームのジョイントにトルクがかかります．
     ```
     [INFO] [xxx.xxx] [follower_arm_driver_node]: Follower Arm Driver started on /dev/ttyACM0
     ```
@@ -47,6 +48,7 @@ ros2 topic pub --once /follower/joint_commands sensor_msgs/msg/JointState "{name
 ```bash
 ros2 run nakalab_so101 follower_arm_driver_node --ros-args \
 -p device:=/dev/ttyACM0 \
+-p read_only:=false \
 -r /follower/joint_commands:=<任意のトピック名>
 ```
 　また，フォロワーアームの関節情報はデフォルトで [sensor_msgs/msg/JointState](https://docs.ros.org/en/noetic/api/sensor_msgs/html/msg/JointState.html) `/follower/joint_states` からパブリッシュされます．．以下のコマンドのようにこのトピックをリマッピングすることで任意のトピックからアームの関節情報を取得できます．
