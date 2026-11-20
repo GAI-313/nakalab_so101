@@ -1,9 +1,12 @@
 [workspace]
 authors = ["GAI-313 <nakatogawagai@gmail.com>"]
-channels = ["conda-forge", "robostack-jazzy"]
+channels = ["conda-forge", "robostack-humble"]
 name = "nakalab_so101"
 platforms = ["osx-64", "osx-arm64"]
 version = "0.1.0"
+
+[system-requirements]
+macos = "14.0"
 
 [activation.env]
 # ROS2
@@ -28,7 +31,8 @@ teleop = "ros2 launch nakalab_so101_teleop teleop.launch.py"
 
 [dependencies]
 # python
-python = "3.12.*"
+python = "3.11.*"
+pip = "*"
 pyserial = "*"
 setuptools = "<70.0.0"
 
@@ -43,22 +47,18 @@ libarrow-all = ">=17.0.0,<18"
 nlohmann_json = ">=3.11.2,<4"
 
 # ROS2
-ros-jazzy-desktop = "*"
-ros-jazzy-rmw-cyclonedds-cpp = "*"
+ros-humble-desktop = "*"
+ros-humble-rmw-cyclonedds-cpp = "*"
 # depends
-ros-jazzy-cv-bridge = "*"
-ros-jazzy-sensor-msgs = "*"
-ros-jazzy-rviz2 = "*"
-ros-jazzy-xacro = "*"
-ros-jazzy-robot-state-publisher = "*"
-ros-jazzy-joint-state-publisher-gui = "*"
-ros-jazzy-ament-index-cpp = ">=1.8.2,<2"
-ros-jazzy-rosbag2-cpp = ">=0.26.9,<0.27"
-ros-jazzy-rosbag2-storage = ">=0.26.9,<0.27"
+ros-humble-cv-bridge = "*"
+ros-humble-sensor-msgs = "*"
+ros-humble-rviz2 = "*"
+ros-humble-xacro = "*"
+ros-humble-robot-state-publisher = "*"
+ros-humble-joint-state-publisher-gui = "*"
+ros-humble-ament-index-cpp = "*"
+ros-humble-rosbag2-cpp = "*"
+ros-humble-rosbag2-storage = "*"
 # rosbag
-ros-jazzy-ros2bag = "*"
-ros-jazzy-rosbag2-storage-mcap = ">=0.26.9,<0.27"
-# rviz
-ros-jazzy-rviz-common = ">=14.1.19,<15"
-ros-jazzy-rviz-rendering = ">=14.1.19,<15"
-ros-jazzy-pluginlib = ">=5.4.4,<6"
+ros-humble-ros2bag = "*"
+ros-humble-rosbag2-storage-mcap = "*"

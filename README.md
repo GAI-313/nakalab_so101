@@ -5,7 +5,7 @@ SO-101 Driver for ROS2
 
 ## Setup
 
-- [macOS で Teleop をする方法](/docs/seup_macos.md)
+- [Build on macOS](/docs/setup_macos.md)
 - [Build on Linux](/docs/setup_linux.md)
 
 ## Tutorials

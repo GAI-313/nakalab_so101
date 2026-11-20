@@ -3,7 +3,7 @@
   <Domain Id="any">
     <General>
       <Interfaces>
-        <NetworkInterface autodetermine="false" name="en11"/>
+        <NetworkInterface autodetermine="false" name="en0"/>
       </Interfaces>
       <AllowMulticast>spdp</AllowMulticast>
       <MaxMessageSize>1350B</MaxMessageSize>
