@@ -53,7 +53,8 @@ target_link_libraries(leader_arm_driver_node nakalab_so101_feetech_bus)
 # Follower Arm Driver Node
 #
 add_executable(follower_arm_driver_node src/follower_arm_driver_node.cpp)
-ament_target_dependencies(follower_arm_driver_node ament_index_cpp rclcpp sensor_msgs)
+ament_target_dependencies(
+  follower_arm_driver_node ament_index_cpp rclcpp sensor_msgs std_msgs)
 target_link_libraries(follower_arm_driver_node nakalab_so101_feetech_bus nakalab_so101_calibration)
 
 #
@@ -95,6 +96,9 @@ if(BUILD_TESTING)
   ament_add_gtest(test_calibration test/test_calibration.cpp)
   target_link_libraries(test_calibration nakalab_so101_calibration)
   target_include_directories(test_calibration PRIVATE include)
+
+  ament_add_gtest(test_power_monitor test/test_power_monitor.cpp)
+  target_include_directories(test_power_monitor PRIVATE include)
 
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)

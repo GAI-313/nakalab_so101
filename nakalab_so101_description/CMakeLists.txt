@@ -14,6 +14,7 @@ install(DIRECTORY
   meshes
   rviz
   calibration
+  video
   DESTINATION share/${PROJECT_NAME}/
 )
 

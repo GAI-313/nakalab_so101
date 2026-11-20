@@ -72,7 +72,10 @@ class FakeCalibrationBus:
         if self.samples:
             self.last_sample = self.samples.pop(0)
         return {
-            motor_id: self.last_sample[motor_id]
+            motor_id: (
+                self.last_sample[motor_id] -
+                self.homing_offsets.get(motor_id, 0)
+            )
             for motor_id in motor_ids
         }
 
@@ -177,14 +180,14 @@ def test_calibration_path_and_overwrite_confirmation(tmp_path):
 
 
 def test_compute_homing_offsets_from_center_pose():
-    """Compute homing offsets from the middle pose."""
+    """Compute clamped homing offsets from the middle pose."""
     offsets = SO101Calibrator.compute_homing_offsets({
         'shoulder_pan': 2047,
         'shoulder_lift': 2050,
         'elbow_flex': 2000,
         'wrist_flex': 2048,
-        'wrist_roll': 2100,
-        'gripper': 1900,
+        'wrist_roll': 4095,
+        'gripper': 0,
     })
 
     assert offsets == {
@@ -192,8 +195,8 @@ def test_compute_homing_offsets_from_center_pose():
         'shoulder_lift': 3,
         'elbow_flex': -47,
         'wrist_flex': 1,
-        'wrist_roll': 53,
-        'gripper': -147,
+        'wrist_roll': 2047,
+        'gripper': -2047,
     }
 
 
@@ -244,8 +247,41 @@ def test_record_ranges_of_motion_updates_min_max():
     assert ranges['gripper'] == {'min': 1450, 'max': 3500}
 
 
-def test_run_writes_eeprom_in_order_and_saves_json(tmp_path):
-    """Run calibration and save a LeRobot-style JSON file."""
+def test_record_ranges_of_motion_rejects_unmoved_joint():
+    """Reject calibration when any joint was not moved."""
+    fake_bus = FakeCalibrationBus([
+        sample(
+            shoulder_pan=2047,
+            shoulder_lift=1000,
+            elbow_flex=1000,
+            wrist_flex=1000,
+            wrist_roll=1000,
+            gripper=1000,
+        ),
+        sample(
+            shoulder_pan=2047,
+            shoulder_lift=3000,
+            elbow_flex=3000,
+            wrist_flex=3000,
+            wrist_roll=3000,
+            gripper=3000,
+        ),
+    ])
+    calibrator = SO101Calibrator(
+        CalibrateConfig('/dev/fake', 'so101_follower', 'arm'),
+        sleep_func=lambda _: None,
+    )
+
+    with pytest.raises(RuntimeError, match='shoulder_pan'):
+        calibrator.record_ranges_of_motion(
+            fake_bus,
+            lambda: fake_bus.position_reads >= 2,
+            display_ranges=False,
+        )
+
+
+def test_run_resets_prior_offsets_writes_eeprom_and_saves_json(tmp_path):
+    """Reset prior offsets, write EEPROM in order, and save JSON."""
     fake_bus = FakeCalibrationBus([
         sample(
             shoulder_pan=2047,
@@ -280,6 +316,10 @@ def test_run_writes_eeprom_in_order_and_saves_json(tmp_path):
             gripper=1450,
         ),
     ])
+    # Simulate an already-calibrated motor with stale homing offsets.
+    fake_bus.homing_offsets = {
+        motor_id: 500 for motor_id in MOTOR_IDS.values()
+    }
     config = CalibrateConfig(
         '/dev/fake',
         'so101_follower',
@@ -330,6 +370,6 @@ def test_run_writes_eeprom_in_order_and_saves_json(tmp_path):
         'id': 6,
         'drive_mode': 0,
         'homing_offset': -147,
-        'range_min': 1450,
-        'range_max': 3500,
+        'range_min': 1597,
+        'range_max': 3647,
     }

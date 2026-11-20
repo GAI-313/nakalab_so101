@@ -17,11 +17,10 @@
 
 namespace
 {
-constexpr int kHalfTurnPosition = 2047;
-constexpr uint8_t kRegMinPositionLimit = 9;
-constexpr uint8_t kRegMaxPositionLimit = 11;
-constexpr uint8_t kRegPhase = 18;
-constexpr uint8_t kRegOperatingMode = 33;
+constexpr int kMaxPositionValue = nakalab_so101::FeetechBus::STS3215_RESOLUTION - 1;
+constexpr int kHalfTurnPosition = kMaxPositionValue / 2;
+constexpr int kMaxHomingOffsetMagnitude =
+  (1 << nakalab_so101::FeetechBus::HOMING_OFFSET_SIGN_BIT) - 1;
 constexpr uint8_t kPositionMode = 0;
 constexpr uint8_t kPhaseFeedbackBit = 0x10;
 
@@ -71,7 +70,7 @@ bool is_file_stem(const std::string & value)
   const auto path = std::filesystem::path(value);
   return path.filename() == value && value.find('/') == std::string::npos;
 }
-}
+}  // namespace
 
 struct MotorCalibration
 {
@@ -123,6 +122,9 @@ public:
 
       wait_for_enter(
         "Move the arm to the middle of its range of motion, then press Enter.");
+      // Reset existing homing offsets and limits before reading center positions
+      // so previous calibration on the motor does not corrupt Present_Position.
+      reset_calibration(bus, ids);
       const auto center_positions = read_required_positions(bus);
       const auto homing_offsets = compute_homing_offsets(center_positions);
       write_homing_offsets(bus, homing_offsets);
@@ -194,10 +196,9 @@ private:
     nakalab_so101::FeetechBus & bus,
     const std::vector<uint8_t> & ids)
   {
-    const auto positions = bus.sync_read_present_positions(ids);
     std::vector<int> missing;
     for (const auto motor_id : ids) {
-      if (!positions.count(motor_id)) {
+      if (!bus.ping(motor_id)) {
         missing.push_back(motor_id);
       }
     }
@@ -218,13 +219,48 @@ private:
     bus.unlock_eeprom(ids);
 
     for (const auto motor_id : ids) {
-      require(bus.write_u8(motor_id, kRegOperatingMode, kPositionMode), motor_id, "write operating mode");
-      const auto phase = bus.read_u8(motor_id, kRegPhase);
+      require(
+        bus.write_u8(
+          motor_id,
+          nakalab_so101::FeetechBus::REG_RETURN_DELAY_TIME,
+          0),
+        motor_id, "write return delay time");
+      require(
+        bus.write_u8(
+          motor_id,
+          nakalab_so101::FeetechBus::REG_OPERATING_MODE,
+          kPositionMode),
+        motor_id, "write operating mode");
+      const auto phase = bus.read_u8(motor_id, nakalab_so101::FeetechBus::REG_PHASE);
       if (phase && (*phase & kPhaseFeedbackBit)) {
         require(
-          bus.write_u8(motor_id, kRegPhase, static_cast<uint8_t>(*phase & ~kPhaseFeedbackBit)),
+          bus.write_u8(
+            motor_id,
+            nakalab_so101::FeetechBus::REG_PHASE,
+            static_cast<uint8_t>(*phase & ~kPhaseFeedbackBit)),
           motor_id, "clear phase feedback bit");
       }
+    }
+  }
+
+  void reset_calibration(
+    nakalab_so101::FeetechBus & bus,
+    const std::vector<uint8_t> & ids)
+  {
+    for (const auto motor_id : ids) {
+      require(bus.write_homing_offset(motor_id, 0), motor_id, "reset homing offset");
+      require(
+        bus.write_u16(
+          motor_id,
+          nakalab_so101::FeetechBus::REG_MIN_POSITION_LIMIT,
+          0),
+        motor_id, "reset range min");
+      require(
+        bus.write_u16(
+          motor_id,
+          nakalab_so101::FeetechBus::REG_MAX_POSITION_LIMIT,
+          static_cast<uint16_t>(kMaxPositionValue)),
+        motor_id, "reset range max");
     }
   }
 
@@ -256,7 +292,10 @@ private:
   {
     std::map<std::string, int> homing_offsets;
     for (const auto & [name, position] : center_positions) {
-      homing_offsets[name] = position - kHalfTurnPosition;
+      homing_offsets[name] = std::clamp(
+        position - kHalfTurnPosition,
+        -kMaxHomingOffsetMagnitude,
+        kMaxHomingOffsetMagnitude);
     }
     return homing_offsets;
   }
@@ -278,10 +317,10 @@ private:
     bool initialized = false;
     std::atomic<bool> stop{false};
     std::thread input_thread([&stop]() {
-      std::string line;
-      std::getline(std::cin, line);
-      stop = true;
-    });
+        std::string line;
+        std::getline(std::cin, line);
+        stop = true;
+      });
 
     auto last_display = std::chrono::steady_clock::now();
     while (!stop) {
@@ -304,6 +343,24 @@ private:
     }
 
     input_thread.join();
+
+    std::vector<std::string> unmoved;
+    for (const auto & [name, _] : kMotorIds) {
+      if (!ranges.count(name) || ranges[name]["min"] == ranges[name]["max"]) {
+        unmoved.push_back(name);
+      } else {
+        ranges[name]["min"] = std::clamp(ranges[name]["min"], 0, kMaxPositionValue);
+        ranges[name]["max"] = std::clamp(ranges[name]["max"], 0, kMaxPositionValue);
+      }
+    }
+    if (!unmoved.empty()) {
+      std::string message = "Some joints were not moved during calibration:";
+      for (const auto & name : unmoved) {
+        message += " " + name;
+      }
+      throw std::runtime_error(message);
+    }
+
     return ranges;
   }
 
@@ -346,10 +403,16 @@ private:
   {
     for (const auto & [_, values] : calibration) {
       require(
-        bus.write_u16(values.motor_id, kRegMinPositionLimit, static_cast<uint16_t>(values.range_min)),
+        bus.write_u16(
+          values.motor_id,
+          nakalab_so101::FeetechBus::REG_MIN_POSITION_LIMIT,
+          static_cast<uint16_t>(values.range_min)),
         values.motor_id, "write range min");
       require(
-        bus.write_u16(values.motor_id, kRegMaxPositionLimit, static_cast<uint16_t>(values.range_max)),
+        bus.write_u16(
+          values.motor_id,
+          nakalab_so101::FeetechBus::REG_MAX_POSITION_LIMIT,
+          static_cast<uint16_t>(values.range_max)),
         values.motor_id, "write range max");
     }
   }
@@ -364,8 +427,12 @@ private:
         throw std::runtime_error(name + ": homing offset verification failed.");
       }
 
-      const auto range_min = bus.read_u16(values.motor_id, kRegMinPositionLimit);
-      const auto range_max = bus.read_u16(values.motor_id, kRegMaxPositionLimit);
+      const auto range_min = bus.read_u16(
+        values.motor_id,
+        nakalab_so101::FeetechBus::REG_MIN_POSITION_LIMIT);
+      const auto range_max = bus.read_u16(
+        values.motor_id,
+        nakalab_so101::FeetechBus::REG_MAX_POSITION_LIMIT);
       if (!range_min || !range_max ||
         *range_min != static_cast<uint16_t>(values.range_min) ||
         *range_max != static_cast<uint16_t>(values.range_max))

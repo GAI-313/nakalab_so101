@@ -29,6 +29,7 @@ setup(
     entry_points={
         'console_scripts': [
             'calibrate = nakalab_so101_py.calibrate:main',
+            'estop_gui = nakalab_so101_py.estop_gui:main',
             'find_port = nakalab_so101_py.find_port:main',
             'follower_arm_driver_node = nakalab_so101_py.so101:follower',
             'setup_motors = nakalab_so101_py.setup_motors:main',

@@ -3,6 +3,7 @@
 import math
 from types import SimpleNamespace
 
+from builtin_interfaces.msg import Time
 from nakalab_so101_py.feetech_bus import FeetechBus
 from nakalab_so101_py.so101 import (
     all_motor_ids,
@@ -37,11 +38,14 @@ class FakeBus:
         self.lock_calls = []
         self.u8_writes = []
         self.u8_reads = {}
+        self.ping_ok = True
+        self.probe_voltage = 12.0
         self.present_states = {
             motor_id: {
                 'position': 2048,
                 'speed': 0,
                 'load': 0,
+                'voltage': 12.0,
             }
             for motor_id in all_motor_ids()
         }
@@ -57,6 +61,16 @@ class FakeBus:
     def is_connected(self):
         """Return whether the fake bus is connected."""
         return self.connected
+
+    def ping(self, motor_id, num_retry=0, timeout=None):
+        """Return a dummy status when ping succeeds."""
+        del motor_id, num_retry, timeout
+        return SimpleNamespace(error=0) if self.ping_ok else None
+
+    def read_voltage(self, motor_id, num_retry=0, timeout=None):
+        """Return fake probe voltage."""
+        del motor_id, num_retry, timeout
+        return self.probe_voltage
 
     def enable_torque(self, motor_ids, enable=True):
         """Record torque enable/disable requests."""
@@ -86,8 +100,9 @@ class FakeBus:
         """Record follower goal state writes."""
         self.goal_states.append(goal_states)
 
-    def sync_read_present_states(self, motor_ids):
+    def sync_read_present_states(self, motor_ids, num_retry=0, timeout=None):
         """Read fake present states."""
+        del num_retry, timeout
         return {
             motor_id: self.present_states[motor_id]
             for motor_id in motor_ids
@@ -98,8 +113,9 @@ class FakeBus:
 class CapturePublisher:
     """Capture messages published by a ROS node."""
 
-    def __init__(self):
+    def __init__(self, topic_name=''):
         """Initialize the published message list."""
+        self.topic_name = topic_name
         self.messages = []
 
     def publish(self, msg):
@@ -110,7 +126,7 @@ class CapturePublisher:
 @pytest.fixture
 def fake_ros_node(monkeypatch):
     """Patch rclpy Node methods so tests do not create a DDS participant."""
-    publishers = []
+    publishers = {}
 
     class FakeLogger:
         """Collect log messages."""
@@ -119,6 +135,7 @@ def fake_ros_node(monkeypatch):
             """Initialize log buffers."""
             self.errors = []
             self.infos = []
+            self.warnings = []
 
         def error(self, message):
             """Record an error log."""
@@ -128,12 +145,16 @@ def fake_ros_node(monkeypatch):
             """Record an info log."""
             self.infos.append(message)
 
+        def warning(self, message):
+            """Record a warning log."""
+            self.warnings.append(message)
+
     class FakeClock:
         """Return a stable ROS timestamp."""
 
         def now(self):
             """Return an object with a to_msg method."""
-            return SimpleNamespace(to_msg=lambda: SimpleNamespace())
+            return SimpleNamespace(to_msg=lambda: Time())
 
     def node_init(self, node_name, parameter_overrides=None):
         self.fake_node_name = node_name
@@ -149,12 +170,16 @@ def fake_ros_node(monkeypatch):
     def get_parameter(self, name):
         return SimpleNamespace(value=self.fake_parameters[name])
 
-    def create_publisher(self, *args, **kwargs):
-        publisher = CapturePublisher()
-        publishers.append(publisher)
+    def create_publisher(self, msg_type, topic_name, qos):
+        del msg_type, qos
+        publisher = CapturePublisher(topic_name)
+        publishers[topic_name] = publisher
         return publisher
 
     def create_subscription(self, *args, **kwargs):
+        return SimpleNamespace(args=args, kwargs=kwargs)
+
+    def create_service(self, *args, **kwargs):
         return SimpleNamespace(args=args, kwargs=kwargs)
 
     def create_timer(self, *args, **kwargs):
@@ -171,6 +196,7 @@ def fake_ros_node(monkeypatch):
     monkeypatch.setattr(Node, 'get_parameter', get_parameter)
     monkeypatch.setattr(Node, 'create_publisher', create_publisher)
     monkeypatch.setattr(Node, 'create_subscription', create_subscription)
+    monkeypatch.setattr(Node, 'create_service', create_service)
     monkeypatch.setattr(Node, 'create_timer', create_timer)
     monkeypatch.setattr(Node, 'get_logger', get_logger)
     monkeypatch.setattr(Node, 'get_clock', get_clock)
@@ -196,7 +222,7 @@ def fake_follower(fake_ros_node):
         ],
     )
     try:
-        yield node, fake_bus
+        yield node, fake_bus, fake_ros_node
     finally:
         node.close()
 
@@ -213,7 +239,7 @@ def make_command(names, positions, velocities=None):
 
 def test_follower_init_enables_torque(fake_follower):
     """Enable torque for all motors when the follower starts."""
-    _node, fake_bus = fake_follower
+    _node, fake_bus, _publishers = fake_follower
 
     assert fake_bus.port == '/dev/fake'
     assert fake_bus.baudrate == 1000000
@@ -226,7 +252,7 @@ def test_follower_init_configures_position_pid_before_torque_enable(
     fake_follower,
 ):
     """Configure follower motors before enabling torque."""
-    _node, fake_bus = fake_follower
+    _node, fake_bus, _publishers = fake_follower
 
     assert fake_bus.unlock_calls == [all_motor_ids()]
     assert fake_bus.lock_calls == [all_motor_ids()]
@@ -256,7 +282,7 @@ def test_follower_init_configures_position_pid_before_torque_enable(
 
 def test_follower_close_disables_torque(fake_follower):
     """Disable torque and disconnect the bus during shutdown."""
-    node, fake_bus = fake_follower
+    node, fake_bus, _publishers = fake_follower
 
     node.close()
 
@@ -268,7 +294,7 @@ def test_follower_command_uses_default_speed_and_ignores_unknown_joint(
     fake_follower,
 ):
     """Convert known joints to raw positions and ignore unknown joints."""
-    node, fake_bus = fake_follower
+    node, fake_bus, _publishers = fake_follower
     command = make_command(
         ['shoulder_pan', 'unknown_joint', 'gripper'],
         [0.0, 1.0, math.pi / 2.0],
@@ -294,7 +320,7 @@ def test_follower_command_uses_default_speed_and_ignores_unknown_joint(
 
 def test_follower_command_clamps_to_joint_limits(fake_follower):
     """Clamp incoming radian commands to URDF joint limits."""
-    node, fake_bus = fake_follower
+    node, fake_bus, _publishers = fake_follower
     command = make_command(['gripper'], [100.0])
 
     node.joint_cmd_callback(command)
@@ -307,7 +333,7 @@ def test_follower_command_clamps_to_joint_limits(fake_follower):
 
 def test_follower_command_skips_duplicate_goal_writes(fake_follower):
     """Do not rewrite identical periodic JointState commands."""
-    node, fake_bus = fake_follower
+    node, fake_bus, _publishers = fake_follower
     command = make_command(['shoulder_pan'], [0.0])
 
     node.joint_cmd_callback(command)
@@ -318,7 +344,7 @@ def test_follower_command_skips_duplicate_goal_writes(fake_follower):
 
 def test_follower_command_uses_velocity_for_speed(fake_follower):
     """Use JointState velocity to set raw servo speed when present."""
-    node, fake_bus = fake_follower
+    node, fake_bus, _publishers = fake_follower
     command = make_command(
         ['wrist_roll'],
         [-math.pi / 4.0],
@@ -336,7 +362,7 @@ def test_follower_command_uses_default_speed_when_velocity_is_partial(
     fake_follower,
 ):
     """Ignore velocity if it does not cover every command name."""
-    node, fake_bus = fake_follower
+    node, fake_bus, _publishers = fake_follower
     command = make_command(
         ['shoulder_lift', 'elbow_flex'],
         [0.25, -0.25],
@@ -352,24 +378,30 @@ def test_follower_command_uses_default_speed_when_velocity_is_partial(
 
 def test_follower_timer_publishes_present_joint_states(fake_follower):
     """Publish present position, velocity, and load as follower joint states."""
-    node, fake_bus = fake_follower
-    capture = CapturePublisher()
-    node.joint_state_pub = capture
+    node, fake_bus, publishers = fake_follower
     fake_bus.present_states[MOTOR_IDS['shoulder_pan']] = {
         'position': 2048,
         'speed': 651,
         'load': 100,
+        'voltage': 12.0,
     }
     fake_bus.present_states[MOTOR_IDS['gripper']] = {
         'position': 3072,
         'speed': -32767,
         'load': 0x0401,
+        'voltage': 11.9,
     }
 
     node.timer_callback()
 
-    assert len(capture.messages) == 1
-    msg = capture.messages[0]
+    joint_msgs = publishers['follower/joint_states'].messages
+    estop_msgs = publishers['follower/estop'].messages
+    voltage_msgs = publishers['follower/voltage'].messages
+    assert len(joint_msgs) == 1
+    assert estop_msgs[-1].data is False
+    assert voltage_msgs[-1].data == pytest.approx(11.9)
+
+    msg = joint_msgs[0]
     shoulder_index = msg.name.index('shoulder_pan')
     gripper_index = msg.name.index('gripper')
 
@@ -381,3 +413,45 @@ def test_follower_timer_publishes_present_joint_states(fake_follower):
         decode_speed(-32767),
     )
     assert msg.effort[gripper_index] == pytest.approx(decode_load(0x0401))
+
+
+def test_follower_low_voltage_triggers_estop_and_blocks_commands(
+    fake_follower,
+):
+    """Trigger E-STOP on low voltage, stop joint_states, and block writes."""
+    node, fake_bus, publishers = fake_follower
+    fake_bus.present_states[MOTOR_IDS['gripper']]['voltage'] = 4.2
+
+    node.timer_callback()
+    node.joint_cmd_callback(make_command(['shoulder_pan'], [0.5]))
+
+    assert node.estop_active is True
+    assert len(publishers['follower/joint_states'].messages) == 0
+    assert publishers['follower/estop'].messages[-1].data is True
+    assert len(fake_bus.goal_states) == 0
+
+
+def test_follower_communication_loss_triggers_estop_and_auto_recovers(
+    fake_follower,
+):
+    """Trigger E-STOP on communication loss and recover when power returns."""
+    node, fake_bus, publishers = fake_follower
+    saved_states = dict(fake_bus.present_states)
+    fake_bus.present_states = {}
+    fake_bus.probe_voltage = None
+
+    node.timer_callback()
+    assert node.estop_active is False
+    node.timer_callback()
+    assert node.estop_active is True
+    assert publishers['follower/estop'].messages[-1].data is True
+
+    # Restore power and trigger probe interval -> recovers automatically.
+    fake_bus.present_states = saved_states
+    fake_bus.probe_voltage = 12.0
+    node.last_probe_time = 0.0
+    node.timer_callback()
+
+    assert node.estop_active is False
+    assert publishers['follower/estop'].messages[-1].data is False
+    assert len(fake_bus.goal_states) == 1

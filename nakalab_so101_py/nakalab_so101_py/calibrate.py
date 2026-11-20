@@ -20,7 +20,9 @@ MOTOR_IDS = {
     'wrist_roll': 5,
     'gripper': 6,
 }
-HALF_TURN_POSITION = 2047
+MAX_POSITION_VALUE = FeetechBus.STS3215_RESOLUTION - 1
+HALF_TURN_POSITION = MAX_POSITION_VALUE // 2
+MAX_HOMING_OFFSET_MAGNITUDE = (1 << FeetechBus.HOMING_OFFSET_SIGN_BIT) - 1
 POSITION_MODE = 0
 PHASE_FEEDBACK_BIT = 0x10
 
@@ -163,6 +165,9 @@ class SO101Calibrator:
                 'Move the arm to the middle of its range of motion, '
                 'then press Enter.'
             )
+            # Reset existing homing offsets and limits right before reading
+            # middle positions, matching LeRobot's set_half_turn_homings().
+            self.reset_calibration(bus, motor_ids)
             center_positions = self.read_required_positions(bus)
             homing_offsets = self.compute_homing_offsets(center_positions)
             self.write_homing_offsets(bus, homing_offsets)
@@ -219,6 +224,13 @@ class SO101Calibrator:
             self._write_u8(
                 bus,
                 motor_id,
+                FeetechBus.REG_RETURN_DELAY_TIME,
+                0,
+                'write return delay time',
+            )
+            self._write_u8(
+                bus,
+                motor_id,
                 FeetechBus.REG_OPERATING_MODE,
                 POSITION_MODE,
                 'write operating mode',
@@ -234,6 +246,28 @@ class SO101Calibrator:
                         phase_without_feedback,
                         'clear phase feedback bit',
                     )
+
+    def reset_calibration(
+        self,
+        bus: FeetechBus,
+        motor_ids: Sequence[int],
+    ) -> None:
+        """Restore factory homing offset and full encoder position limits."""
+        for motor_id in motor_ids:
+            status = bus.write_homing_offset(motor_id, 0)
+            self._check_status(status, motor_id, 'reset homing offset')
+            status = bus.write_u16(
+                motor_id,
+                FeetechBus.REG_MIN_POSITION_LIMIT,
+                0,
+            )
+            self._check_status(status, motor_id, 'reset range min')
+            status = bus.write_u16(
+                motor_id,
+                FeetechBus.REG_MAX_POSITION_LIMIT,
+                MAX_POSITION_VALUE,
+            )
+            self._check_status(status, motor_id, 'reset range max')
 
     def read_required_positions(self, bus: FeetechBus) -> Dict[str, int]:
         """Read all expected motor positions by joint name."""
@@ -256,11 +290,15 @@ class SO101Calibrator:
     def compute_homing_offsets(
         center_positions: Dict[str, int],
     ) -> Dict[str, int]:
-        """Compute homing offsets from middle-pose positions."""
-        return {
-            name: int(position) - HALF_TURN_POSITION
-            for name, position in center_positions.items()
-        }
+        """Compute clamped homing offsets from middle-pose positions."""
+        homing_offsets: Dict[str, int] = {}
+        for name, position in center_positions.items():
+            offset = int(position) - HALF_TURN_POSITION
+            homing_offsets[name] = max(
+                -MAX_HOMING_OFFSET_MAGNITUDE,
+                min(MAX_HOMING_OFFSET_MAGNITUDE, offset),
+            )
+        return homing_offsets
 
     def write_homing_offsets(
         self,
@@ -306,10 +344,19 @@ class SO101Calibrator:
                 break
             self.sleep_func(0.05)
 
+        unmoved = [
+            name for name, values in ranges.items()
+            if values['min'] == values['max']
+        ]
+        if unmoved:
+            raise RuntimeError(
+                f'Some joints were not moved during calibration: {unmoved}'
+            )
+
         return {
             name: {
-                'min': int(values['min']),
-                'max': int(values['max']),
+                'min': max(0, min(MAX_POSITION_VALUE, int(values['min']))),
+                'max': max(0, min(MAX_POSITION_VALUE, int(values['max']))),
             }
             for name, values in ranges.items()
         }

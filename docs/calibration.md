@@ -21,7 +21,7 @@
      ```bash
     ros2 run nakalab_so101_py calibrate --ros-args \
     -p device:=/dev/ttyACM0 \
-    -p arm_type:=<so101_follower \
+    -p arm_type:=so101_follower \
     -p calibration_id:=nakalab_so101_follower
     ```
 1. アームを下記の画像のような姿勢に変更してください．<br>

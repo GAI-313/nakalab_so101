@@ -5,6 +5,8 @@ import struct
 from nakalab_so101_py import feetech_bus
 from nakalab_so101_py.feetech_bus import FeetechBus
 
+import pytest
+
 
 class FakeSerial:
     """Small pyserial fake with scripted read responses."""
@@ -197,3 +199,64 @@ def test_homing_offset_sign_magnitude_encoding():
     assert FeetechBus.decode_homing_offset(2047) == 2047
     assert FeetechBus.decode_homing_offset(2049) == -1
     assert FeetechBus.decode_homing_offset(4095) == -2047
+
+
+def test_present_position_sign_magnitude_decoding(monkeypatch):
+    """Decode negative Present_Position using bit 15 sign-magnitude."""
+    fake = FakeSerial()
+
+    def on_write(serial_obj, packet):
+        motor_id, instruction, _ = decode_command(packet)
+        if instruction == FeetechBus.INST_READ:
+            # -5 in 15-bit sign-magnitude is 0x8005 (not two's complement)
+            serial_obj.queue(status_packet(motor_id, 0, struct.pack('<H', 0x8005)))
+
+    fake.on_write = on_write
+    install_serial(monkeypatch, fake)
+    bus = FeetechBus('/dev/fake')
+
+    assert bus.sync_read_present_positions([1]) == {1: -5}
+
+
+def test_read_retries_and_skips_mismatched_motor_id(monkeypatch):
+    """Retry on missing/corrupt response and ignore wrong motor IDs."""
+    fake = FakeSerial()
+    attempts = {'count': 0}
+
+    def on_write(serial_obj, packet):
+        motor_id, instruction, _ = decode_command(packet)
+        if instruction == FeetechBus.INST_READ:
+            attempts['count'] += 1
+            if attempts['count'] == 1:
+                # Wrong motor ID followed by timeout
+                serial_obj.queue(status_packet(99, 0, struct.pack('<H', 123)))
+            else:
+                serial_obj.queue(status_packet(motor_id, 0, struct.pack('<H', 2047)))
+
+    fake.on_write = on_write
+    install_serial(monkeypatch, fake)
+    bus = FeetechBus('/dev/fake')
+
+    assert bus.sync_read_present_positions([1]) == {1: 2047}
+    assert attempts['count'] == 2
+
+
+def test_sync_read_present_states_decodes_voltage(monkeypatch):
+    """Read 7-byte servo state including supply voltage in volts."""
+    fake = FakeSerial()
+
+    def on_write(serial_obj, packet):
+        motor_id, instruction, _ = decode_command(packet)
+        if instruction == FeetechBus.INST_READ:
+            payload = struct.pack('<HHHB', 2048, 100, 50, 121)
+            serial_obj.queue(status_packet(motor_id, 0, payload))
+
+    fake.on_write = on_write
+    install_serial(monkeypatch, fake)
+    bus = FeetechBus('/dev/fake')
+
+    states = bus.sync_read_present_states([1])
+    assert states[1]['position'] == 2048
+    assert states[1]['speed'] == 100
+    assert states[1]['load'] == 50
+    assert states[1]['voltage'] == pytest.approx(12.1)

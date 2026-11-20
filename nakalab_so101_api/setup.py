@@ -24,7 +24,12 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'api_smoke = nakalab_so101_api.api_smoke:main',
+            'demo_get_states = demos.demo_get_states:main',
+            'demo_groupstate = demos.demo_groupstate:main',
+            'demo_move_abs = demos.demo_move_abs:main',
+            'demo_move_joints = demos.demo_move_joints:main',
+            'demo_move_rel = demos.demo_move_rel:main',
+            'demo_pick_and_place = demos.demo_pick_and_place:main',
         ],
     },
 )

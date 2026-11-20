@@ -1,19 +1,27 @@
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
+#include "std_msgs/msg/bool.hpp"
+#include "std_msgs/msg/float32.hpp"
 #include "nakalab_so101/Calibration.hpp"
 #include "nakalab_so101/FeetechBus.hpp"
-#include <map>
-#include <string>
-#include <vector>
-#include <cmath>
-#include <memory>
+#include "nakalab_so101/PowerMonitor.hpp"
+
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <cmath>
+#include <map>
+#include <memory>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace
 {
+constexpr int kControlReadTimeoutMs = 20;
+constexpr auto kProbeInterval = std::chrono::milliseconds(200);
+
 std::string default_calibration_root()
 {
   try {
@@ -23,7 +31,7 @@ std::string default_calibration_root()
     return "";
   }
 }
-}
+}  // namespace
 
 class FollowerArmDriverNode : public rclcpp::Node
 {
@@ -37,12 +45,20 @@ public:
     this->declare_parameter<std::string>("calibration_file", "");
     this->declare_parameter<std::string>("calibration_root", default_calibration_root());
     this->declare_parameter<bool>("hold_current_position_on_startup", true);
+    this->declare_parameter<double>("min_voltage", 5.5);
+    this->declare_parameter<int>("estop_miss_threshold", 2);
 
     auto device_port = this->get_parameter("device").as_string();
     auto baudrate = this->get_parameter("baudrate").as_int();
     max_speed_ = this->get_parameter("max_speed").as_int();
     hold_current_position_on_startup_ =
       this->get_parameter("hold_current_position_on_startup").as_bool();
+
+    nakalab_so101::PowerMonitorConfig monitor_config;
+    monitor_config.expected_motor_count = motor_ids_.size();
+    monitor_config.min_voltage = this->get_parameter("min_voltage").as_double();
+    monitor_config.miss_threshold = this->get_parameter("estop_miss_threshold").as_int();
+    power_monitor_ = std::make_unique<nakalab_so101::PowerMonitor>(monitor_config);
 
     load_calibration(
       this->get_parameter("calibration_file").as_string(),
@@ -62,17 +78,24 @@ public:
     bus_->enable_torque(motor_ids, false);
     verify_calibration();
     hold_current_position_on_startup(motor_ids);
-    bus_->enable_torque(get_all_motor_ids(), true);
+    bus_->enable_torque(motor_ids, true);
 
     joint_state_pub_ = this->create_publisher<sensor_msgs::msg::JointState>(
       "follower/joint_states",
+      10);
+    estop_pub_ = this->create_publisher<std_msgs::msg::Bool>(
+      "follower/estop",
+      10);
+    voltage_pub_ = this->create_publisher<std_msgs::msg::Float32>(
+      "follower/voltage",
       10);
     joint_cmd_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
       "follower/joint_commands", 10,
       std::bind(&FollowerArmDriverNode::joint_cmd_callback, this, std::placeholders::_1));
 
+    last_probe_time_ = std::chrono::steady_clock::now();
     timer_ = this->create_wall_timer(
-      std::chrono::milliseconds(20), // 50Hz
+      std::chrono::milliseconds(20),
       std::bind(&FollowerArmDriverNode::timer_callback, this));
 
     RCLCPP_INFO(this->get_logger(), "Follower Arm Driver started on %s", device_port.c_str());
@@ -89,7 +112,7 @@ public:
 private:
   void joint_cmd_callback(const sensor_msgs::msg::JointState::SharedPtr msg)
   {
-    if (!bus_->is_connected()) {
+    if (!bus_->is_connected() || power_monitor_->is_estop_active()) {
       return;
     }
 
@@ -134,7 +157,37 @@ private:
       return;
     }
 
-    auto states = bus_->sync_read_present_states(get_all_motor_ids());
+    if (power_monitor_->is_estop_active()) {
+      handle_estop_state();
+      return;
+    }
+
+    const auto motor_ids = get_all_motor_ids();
+    auto states = bus_->sync_read_present_states(motor_ids, 0, kControlReadTimeoutMs);
+
+    std::vector<double> voltages;
+    voltages.reserve(states.size());
+    for (const auto & [_, state] : states) {
+      voltages.push_back(state.voltage);
+    }
+
+    const auto update = power_monitor_->update_from_voltages(voltages);
+    publish_power_status(update.estop_active, update.min_voltage);
+
+    if (update.entered_estop) {
+      RCLCPP_ERROR(
+        this->get_logger(),
+        "Emergency stop / power loss detected (%s, min voltage=%.1fV). "
+        "Stopping joint_states and blocking commands.",
+        update.reason.c_str(),
+        update.min_voltage);
+      last_probe_time_ = std::chrono::steady_clock::now();
+      return;
+    }
+
+    if (update.estop_active || states.size() < motor_ids.size()) {
+      return;
+    }
 
     auto msg = sensor_msgs::msg::JointState();
     msg.header.stamp = this->get_clock()->now();
@@ -147,7 +200,7 @@ private:
         // Speed conversion
         int16_t raw_speed = state.speed;
         double speed_rad_s = 0.0;
-        if (raw_speed & 0x8000) { // Check sign bit
+        if (raw_speed & 0x8000) {
           speed_rad_s = -static_cast<double>(raw_speed & 0x7FFF) / 651.0;
         } else {
           speed_rad_s = static_cast<double>(raw_speed) / 651.0;
@@ -157,7 +210,7 @@ private:
         // Load conversion
         int16_t raw_load = state.load;
         double effort = 0.0;
-        if (raw_load & 0x0400) { // Check sign bit (bit 10)
+        if (raw_load & 0x0400) {
           effort = -static_cast<double>(raw_load & 0x03FF) / 1000.0;
         } else {
           effort = static_cast<double>(raw_load & 0x03FF) / 1000.0;
@@ -166,6 +219,70 @@ private:
       }
     }
     joint_state_pub_->publish(msg);
+  }
+
+  void handle_estop_state()
+  {
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_probe_time_ < kProbeInterval) {
+      publish_power_status(true, power_monitor_->last_min_voltage());
+      return;
+    }
+    last_probe_time_ = now;
+
+    const uint8_t probe_id = motor_ids_.at("shoulder_pan");
+    const auto probe_voltage = bus_->read_voltage(probe_id, 0, kControlReadTimeoutMs);
+    const auto update = power_monitor_->update_from_probe(probe_voltage);
+
+    if (update.ready_for_recovery) {
+      std::string error_message;
+      if (perform_recovery(error_message)) {
+        RCLCPP_INFO(
+          this->get_logger(),
+          "Servo power restored (%.1fV); recovered from E-STOP with current position hold.",
+          update.min_voltage);
+      } else {
+        RCLCPP_WARN(
+          this->get_logger(), "Recovery attempt after power restore failed: %s",
+          error_message.c_str());
+      }
+    }
+
+    publish_power_status(power_monitor_->is_estop_active(), power_monitor_->last_min_voltage());
+  }
+
+  void publish_power_status(bool estop_active, double min_voltage)
+  {
+    std_msgs::msg::Bool estop_msg;
+    estop_msg.data = estop_active;
+    estop_pub_->publish(estop_msg);
+
+    std_msgs::msg::Float32 voltage_msg;
+    voltage_msg.data = static_cast<float>(min_voltage);
+    voltage_pub_->publish(voltage_msg);
+  }
+
+  bool perform_recovery(std::string & error_message)
+  {
+    const auto motor_ids = get_all_motor_ids();
+    for (const auto motor_id : motor_ids) {
+      if (!bus_->ping(motor_id, 1, kControlReadTimeoutMs)) {
+        error_message = "Motor ID " + std::to_string(motor_id) + " did not respond.";
+        return false;
+      }
+    }
+
+    try {
+      bus_->enable_torque(motor_ids, false);
+      hold_current_position_on_startup(motor_ids);
+      bus_->enable_torque(motor_ids, true);
+    } catch (const std::exception & error) {
+      error_message = error.what();
+      return false;
+    }
+
+    power_monitor_->complete_recovery();
+    return true;
   }
 
   double pos_to_rad(int16_t pos)
@@ -246,7 +363,7 @@ private:
 
     std::map<uint8_t, nakalab_so101::ServoState> hold_states;
     for (const auto & [motor_id, state] : states) {
-      hold_states[motor_id] = {state.position, 0, 0};
+      hold_states[motor_id] = {state.position, 0, 0, state.voltage};
     }
     if (!bus_->sync_write_goal_states(hold_states)) {
       throw std::runtime_error("Failed to synchronize current positions before enabling torque");
@@ -267,9 +384,13 @@ private:
   }
 
   std::unique_ptr<nakalab_so101::FeetechBus> bus_;
+  std::unique_ptr<nakalab_so101::PowerMonitor> power_monitor_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr estop_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr voltage_pub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_cmd_sub_;
   rclcpp::TimerBase::SharedPtr timer_;
+  std::chrono::steady_clock::time_point last_probe_time_;
   int max_speed_;
   bool hold_current_position_on_startup_{true};
   nakalab_so101::Calibration calibration_;
