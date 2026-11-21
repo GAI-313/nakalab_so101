@@ -2,11 +2,11 @@
 authors = ["GAI-313 <nakatogawagai@gmail.com>"]
 channels = ["conda-forge", "robostack-humble"]
 name = "nakalab_so101"
-platforms = ["osx-64", "osx-arm64"]
+platforms = [
+  { platform = "osx-64", macos = "14.0" },
+  { platform = "osx-arm64", macos = "14.0" }
+]
 version = "0.1.0"
-
-[system-requirements]
-macos = "14.0"
 
 [activation.env]
 # ROS2
@@ -39,6 +39,7 @@ setuptools = "<70.0.0"
 # develop tools
 vcstool = "*"
 ros-dev-tools = "*"
+cxx-compiler = "1.*"
 
 # cpp
 qt-main = ">=5.15.15,<6"

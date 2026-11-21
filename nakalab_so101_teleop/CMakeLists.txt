@@ -47,9 +47,13 @@ ament_target_dependencies(lerobot_teleop_panel
 
 target_link_libraries(lerobot_teleop_panel
   Qt5::Widgets
-  yaml-cpp
+  yaml-cpp::yaml-cpp
   ${OpenCV_LIBRARIES}
 )
+
+if(APPLE)
+  target_link_options(lerobot_teleop_panel PRIVATE "LINKER:-dead_strip_dylibs")
+endif()
 
 pluginlib_export_plugin_description_file(rviz_common plugins.xml)
 
